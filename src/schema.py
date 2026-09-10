@@ -214,8 +214,33 @@ _OPEN_ONLY_RE = re.compile(
 _JSON_OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)
 
 
+# Glaive writes ``arguments`` as a single-quoted string that may contain literal
+# newlines::
+#
+#     {"name": "create_calendar_event", "arguments": '{
+#       "title": "Team Meeting"}'}
+#
+# That is not valid JSON, and it is not a valid Python literal either -- Python
+# forbids a raw newline inside a quoted string -- so both json.loads and
+# ast.literal_eval reject it. Rewrite just that one value as a properly escaped
+# JSON string and retry. Applied only after the normal paths fail, so it cannot
+# change the meaning of anything that already parsed.
+_PY_ARG_STRING_RE = re.compile(
+    r'("arguments"\s*:\s*)\'(.*?)\'(?=\s*[,}])', re.DOTALL
+)
+
+
+def _repair_python_string_arguments(blob: str) -> str:
+    def replace(match: "re.Match[str]") -> str:
+        inner = match.group(2).replace('\\"', '"').replace("\\'", "'")
+        return match.group(1) + json.dumps(inner)
+
+    return _PY_ARG_STRING_RE.sub(replace, blob)
+
+
 def _loads_lenient(blob: str) -> Any:
-    """Parse JSON, falling back to a Python literal and to brace trimming."""
+    """Parse JSON, falling back to a Python literal, brace trimming, and a
+    repair pass for Glaive's single-quoted ``arguments``."""
     blob = blob.strip()
     for candidate in (blob, blob.rstrip(".,;")):
         try:
@@ -232,6 +257,9 @@ def _loads_lenient(blob: str) -> Any:
             return json.loads(match.group(0))
         except (json.JSONDecodeError, ValueError):
             pass
+    repaired = _repair_python_string_arguments(blob)
+    if repaired != blob:
+        return _loads_lenient(repaired)
     raise ValueError(f"unparseable tool call: {blob[:200]!r}")
 
 

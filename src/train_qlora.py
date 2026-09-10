@@ -137,20 +137,35 @@ def train(config: dict[str, Any], data_dir: Path, variant: str, out_dir: Path) -
     model_name = config["model_name"]
     records = _load_records(data_dir, variant)
 
+    # Fail loudly on an empty corpus. The previous version happily "trained" a
+    # Trainer loop over zero records in 0.6 minutes and saved an untrained
+    # adapter, which then produced a full-looking results table.
+    if not records:
+        raise SystemExit(
+            f"no training records in {data_dir} for variant {variant!r}; "
+            "check the data-prep stage before training"
+        )
+
     tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    # bfloat16 needs Ampere (A100/L4/3090+) or newer. On Turing (T4, Kaggle and
-    # Colab's free tier) there is no native bf16 and requesting it silently
-    # produces broken gradients rather than an error -- so pick fp16 there.
+    # bfloat16 needs Ampere (compute capability 8.0+) or newer.
+    #
+    # Gate on the compute capability, NOT on torch.cuda.is_bf16_supported():
+    # that call returned True on a Tesla P100 (capability 6.0), which has no
+    # native bf16 at all, so the previous version selected bf16 on hardware
+    # that cannot do it and silently produced broken gradients. Turing (T4,
+    # Kaggle's default) and Pascal (P100) must take the fp16 path.
     if torch.cuda.is_available():
-        supports_bf16 = torch.cuda.is_bf16_supported()
+        major, minor = torch.cuda.get_device_capability(0)
+        supports_bf16 = major >= 8
         compute_dtype = torch.bfloat16 if supports_bf16 else torch.float16
         device_name = torch.cuda.get_device_name(0)
-        print(f"[device] {device_name} | bf16 supported: {supports_bf16} "
-              f"| compute dtype: {compute_dtype}")
+        print(f"[device] {device_name} | capability {major}.{minor} "
+              f"| bf16: {supports_bf16} | compute dtype: {compute_dtype}")
     else:
+        supports_bf16 = False
         compute_dtype = torch.float32
 
     quant_config = BitsAndBytesConfig(
@@ -197,8 +212,8 @@ def train(config: dict[str, Any], data_dir: Path, variant: str, out_dir: Path) -
         warmup_ratio=config.get("warmup_ratio", 0.03),
         logging_steps=config.get("logging_steps", 10),
         save_strategy="epoch",
-        bf16=torch.cuda.is_available() and torch.cuda.is_bf16_supported(),
-        fp16=torch.cuda.is_available() and not torch.cuda.is_bf16_supported(),
+        bf16=supports_bf16,
+        fp16=torch.cuda.is_available() and not supports_bf16,
         gradient_checkpointing=config.get("gradient_checkpointing", True),
         report_to=[],
         seed=config.get("seed", 0),
@@ -221,6 +236,8 @@ def train(config: dict[str, Any], data_dir: Path, variant: str, out_dir: Path) -
     peak_mem_gb = None
     if torch.cuda.is_available():
         peak_mem_gb = round(torch.cuda.max_memory_allocated() / 1024 ** 3, 2)
+    else:
+        peak_mem_gb = None
 
     run_meta = {
         "config": config,

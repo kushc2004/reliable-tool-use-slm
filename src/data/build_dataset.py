@@ -27,6 +27,10 @@ __all__ = ["load_jsonl", "write_jsonl", "build", "main"]
 
 SPLITS = ["train", "heldout_tools", "unseen_functions", "no_tool"]
 
+# Fraction of distinct function names withheld from training entirely, so the
+# unseen-function metric tests schema generalisation rather than memorisation.
+UNSEEN_NAME_FRACTION = 0.15
+
 
 def load_jsonl(path: Path) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
@@ -46,10 +50,21 @@ def write_jsonl(path: Path, records: list[dict[str, Any]]) -> None:
 
 
 def _validate(record: dict[str, Any]) -> str | None:
-    """Return an error string if the record is unusable."""
+    """Return an error string if the record is unusable.
+
+    Tool list requirements are asymmetric on purpose:
+
+    * ``expects_call`` -- the schema is mandatory. Without it the gold call
+      cannot be rendered or scored, so the row is unusable.
+    * no call expected -- an *empty* tool list is valid and in fact the
+      sharpest case there is. When2Call builds its ``cannot_answer`` rows by
+      removing the tools outright, and "no functions are available, so do not
+      invent one" is exactly the behaviour being measured. Requiring tools here
+      would discard those rows.
+    """
     if not record.get("messages"):
         return "no messages"
-    if not record.get("tools"):
+    if record.get("expects_call") and not record.get("tools"):
         return "no tools advertised"
     if record.get("expects_call") and not record.get("gold_calls"):
         return "expects_call but no gold_calls"
@@ -88,22 +103,43 @@ def _load_source(name: str, limit: int, neg_limit: int) -> list[dict[str, Any]]:
         print(f"[{name}] seen={stats['seen']} kept={stats['kept']} skipped={stats['skipped']}")
         records.extend(converted)
     elif name == "when2call":
-        rows = load_negative("nvidia/When2Call", limit=neg_limit)
-        converted, stats = convert_neg(rows)
-        print(f"[{name}] seen={stats['seen']} kept={stats['kept']} skipped={stats['skipped']}")
-        records.extend(converted)
+        # Both training configs are needed and neither alone is sufficient:
+        # train_sft (15000 rows) is entirely non-call, so it supplies only the
+        # request_for_info / cannot_answer / direct decisions, while train_pref
+        # (9000 rows) is the only place a tool_call gold behaviour exists.
+        from .prepare_when2call import (
+            DEFAULT_HUB as W2C_HUB,
+            PREF_CONFIG,
+            PREF_SPLIT,
+            SFT_CONFIG,
+            SFT_SPLIT,
+        )
+        from .prepare_when2call import convert as convert_w2c
+        from .prepare_when2call import load_rows as load_w2c
+
+        sft_rows = load_w2c(W2C_HUB, config=SFT_CONFIG, split=SFT_SPLIT, limit=neg_limit)
+        pref_rows = load_w2c(W2C_HUB, config=PREF_CONFIG, split=PREF_SPLIT, limit=neg_limit)
+        sft_records, sft_stats = convert_w2c(sft_rows, mode="train", origin=SFT_CONFIG)
+        pref_records, pref_stats = convert_w2c(pref_rows, mode="train", origin=PREF_CONFIG)
+        print(f"[when2call] sft: kept={sft_stats.get('kept')} "
+              f"labels={ {k[6:]: v for k, v in sft_stats.items() if k.startswith('label:')} }")
+        print(f"[when2call] pref: kept={pref_stats.get('kept')} "
+              f"labels={ {k[6:]: v for k, v in pref_stats.items() if k.startswith('label:')} }")
+        records.extend(sft_records + pref_records)
     else:
         raise SystemExit(f"unknown source: {name}")
     return records
 
 
-def _unseen_function_split(eval_records: list[dict[str, Any]], held_out_names: set[str]) -> list[dict[str, Any]]:
-    """Retag eval records whose call targets a held-out function name."""
-    for record in eval_records:
-        names = {call["name"] for call in record.get("gold_calls") or []}
-        if names & held_out_names:
-            record["split"] = "unseen_functions"
-    return eval_records
+def _retag(records: list[dict[str, Any]], split: str) -> list[dict[str, Any]]:
+    """Stamp a split name onto eval records, in place, and return them.
+
+    Safe to mutate because every caller passes a slice that has already been
+    removed from the pool training samples from.
+    """
+    for record in records:
+        record["split"] = split
+    return records
 
 
 def build(
@@ -129,31 +165,57 @@ def build(
             records.extend(_load_source(source, limit, neg_limit))
 
         rng.shuffle(records)
-        train = [r for r in records if r.get("expects_call")]
+        positives = [r for r in records if r.get("expects_call")]
         negatives = [r for r in records if not r.get("expects_call")]
+
+        # Hold out whole function NAMES before any training row is chosen.
+        #
+        # This replaces a tagging pass that keyed on a "_eval" name suffix no
+        # real function carries, so it never fired and every "unseen" call had
+        # in fact been trained on. Withholding the schemas up front is what
+        # makes the metric mean anything.
+        all_names = sorted(
+            {call["name"] for record in positives for call in (record.get("gold_calls") or [])}
+        )
+        n_unseen_names = max(1, int(len(all_names) * UNSEEN_NAME_FRACTION))
+        unseen_names = set(rng.sample(all_names, n_unseen_names))
+        print(f"[split] holding out {len(unseen_names)}/{len(all_names)} function names as unseen")
+
+        def targets_unseen(record: dict[str, Any]) -> bool:
+            return bool({c["name"] for c in record.get("gold_calls") or []} & unseen_names)
+
+        seen_pool = [r for r in positives if not targets_unseen(r)]
+        unseen_pool = [r for r in positives if targets_unseen(r)]
+
+        # Carve the eval sets out BEFORE training samples the pools, and slice
+        # rather than copy: the rows used for eval are physically removed from
+        # the lists training draws from, so overlap is impossible.
+        per_split = max(1, n_eval // 3)
+        eval_records = (
+            _retag(seen_pool[:per_split], "heldout_tools")
+            + _retag(unseen_pool[:per_split], "unseen_functions")
+            + _retag(negatives[:per_split], "no_tool")
+        )
+        seen_train_pool = seen_pool[per_split:]
+        negatives_train_pool = negatives[per_split:]
 
         # Bring negatives in at the requested ratio, then apply the 3K budget:
         # the base repo's finding is that most of the benefit arrives by ~3K
         # examples, so the interesting variable is the negative ratio, not the
         # total row count.
         wanted_neg = int(n_train * neg_ratio)
-        if len(negatives) < wanted_neg:
-            print(f"[warn] only {len(negatives)} negatives available, wanted {wanted_neg}")
-            wanted_neg = len(negatives)
-        positives = train[: max(1, n_train - wanted_neg)]
-        train = positives + negatives[:wanted_neg]
+        if len(negatives_train_pool) < wanted_neg:
+            print(f"[warn] only {len(negatives_train_pool)} negatives available, "
+                  f"wanted {wanted_neg}")
+            wanted_neg = len(negatives_train_pool)
+        n_pos = max(1, n_train - wanted_neg)
+        if len(seen_train_pool) < n_pos:
+            print(f"[warn] only {len(seen_train_pool)} positive rows available, wanted {n_pos}")
+            n_pos = len(seen_train_pool)
+        train = seen_train_pool[:n_pos] + negatives_train_pool[:wanted_neg]
         rng.shuffle(train)
-
-        # Held-out split: build eval sets out of whatever tools show up, and
-        # mark a slice of function names as unseen.
-        train_names = {
-            call["name"] for record in train for call in (record.get("gold_calls") or [])
-        }
-        all_eval_pool = [r for r in records if r.get("expects_call")]
-        eval_records = all_eval_pool[:n_eval] if all_eval_pool else []
-        held_out = {name for name in train_names if name.endswith("_eval")}
-        if held_out:
-            eval_records = _unseen_function_split(eval_records, held_out)
+        print(f"[split] train={len(train)} "
+              f"(pos={n_pos} neg={wanted_neg}) eval={len(eval_records)}")
 
     # Validate and drop anything unusable, reporting why.
     reasons: Counter[str] = Counter()
@@ -171,6 +233,16 @@ def build(
             reasons[error] += 1
         else:
             clean_eval.append(record)
+
+    # Refuse to emit an empty training split. Writing zero rows and exiting 0 is
+    # how a loader bug turns into a "successful" run that trains on nothing and
+    # then republishes stale metrics.
+    if not clean_train:
+        raise SystemExit(
+            f"refusing to write an empty training split to {out_dir}: all "
+            f"{len(train)} candidate records were dropped ({dict(reasons) or 'none'}). "
+            "This is a data-loader bug, not an empty dataset."
+        )
 
     write_jsonl(out_dir / "train.jsonl", clean_train)
     write_jsonl(out_dir / "eval.jsonl", clean_eval)
