@@ -1,0 +1,14 @@
+{
+  "id": "kushchaudhari/reliable-tool-use-slm",
+  "title": "Reliable Tool-Use SLM (QLoRA + When2Call)",
+  "code_file": "reliable_tool_use_slm.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": false,
+  "enable_gpu": true,
+  "enable_internet": true,
+  "dataset_sources": [],
+  "competition_sources": [],
+  "kernel_sources": [],
+  "model_sources": []
+}
