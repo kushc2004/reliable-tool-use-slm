@@ -39,9 +39,20 @@ logging_steps: 10
 # Reproducibility
 seed: 0
 
-# Data: ~3K Glaive positives + ~1K balanced When2Call decision examples.
-# neg-ratio 0.25 gives roughly 3000 positives + 1000 negatives.
+# Data: the SAME shared corpus as tool_sft (data/processed), read in full.
+#
+# Separated from tool_sft by --variant, not by corpus. neg_ratio 0.25 over 4000
+# rows yields ~3000 Glaive positives + ~1000 When2Call negatives, so this arm
+# sees an identical positive set plus the negative supervision that is the
+# experimental variable.
+#
+# Note the record count genuinely differs from tool_sft (4000 vs 3000): the
+# added negatives ARE the treatment, and both arms run the same 3 epochs, so
+# gradient-step count differs slightly. Treat that as part of the intervention
+# rather than a controlled quantity.
 data_source: glaive,when2call
-n_train: 4000
-n_when2call: 1000
+corpus: data/processed
+variant: sft-neg
+n_train_total: 4000        # shared corpus, used in full
+n_negatives: 1000          # ~25% of the shared corpus
 neg_ratio: 0.25

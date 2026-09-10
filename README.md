@@ -15,10 +15,12 @@ Three checkpoints, trained/evaluated from the same base so the comparison is cle
 | Checkpoint | Training data | Isolates |
 |---|---|---|
 | **Base** | none | zero-shot behaviour |
-| **Tool-SFT** | ~3K function-calling examples | what positive supervision buys |
-| **Reliable Tool-SFT** | ~3K function-calling + ~1K balanced When2Call decisions | what negative supervision buys on top |
+| **Tool-SFT** | ~3K function-calling positives | what positive supervision buys |
+| **Reliable Tool-SFT** | the same ~3K positives **plus** ~1K no-tool / clarification / refusal examples | what negative supervision buys on top |
 
-Training is 4-bit NF4 QLoRA (rank 16, alpha 32, LR 2e-4, 3 epochs, max seq len 512, effective batch 16) via PEFT + `transformers.Trainer`. Tool-SFT and Reliable Tool-SFT are trained **independently from the same base**, not sequentially, so the only difference is the data.
+Both trained arms read **one shared corpus** and are separated by `--variant`, not by a separately-built dataset. That distinction matters: with two independently-built corpora the arms disagreed on 40 of 166 eval rows, so one model was graded on rows it had already trained on, and the "negative" corpus silently resolved to **zero** negatives because it was sourced from Glaive alone (Glaive contains no no-tool rows). Sharing the corpus makes the positive sets identical and leaves the negatives as the only variable.
+
+Training is 4-bit NF4 QLoRA (rank 16, alpha 32, LR 2e-4, 3 epochs, max seq len 512, effective batch 16) via PEFT + `transformers.Trainer`. The two checkpoints are trained **independently from the same base**, not sequentially.
 
 ## Evaluation
 
@@ -26,29 +28,24 @@ Two independent tracks, both scored from raw generations:
 
 **Tool-call track** — JSON validity, function-name accuracy, argument accuracy, exact call-set match, and held-out-function exact match (whole function *names* excluded from training, so this measures schema generalisation rather than phrasing memorisation).
 
-**Tool-decision track (When2Call)** — four-way decision accuracy over `tool_call` / `direct` / `request_for_info` / `cannot_answer`, plus the metrics that give the project its identity:
+**Tool-decision track (When2Call)** — decision accuracy over `tool_call` / `request_for_info` / `cannot_answer`, plus the metrics that give the project its identity:
 
 - **false tool-call rate** — of all samples where no tool was warranted, how often a call was emitted anyway
 - **missing-info accuracy** — on under-specified prompts, did it ask rather than invent an argument
 - **cannot-answer accuracy** — did it decline rather than call the nearest available function
 
+Two caveats on this track, both measured against the real dataset rather than assumed:
+
+- The `mcq` test split carries all four answer strings on every row, but **no row is gold-`direct`** — the label distribution is `tool_call` 35.5%, `cannot_answer` 35.5%, `request_for_info` 29.1%. `direct` accuracy is therefore **not measurable on the real benchmark**; the scorer still reports it, and it is meaningful only on the synthetic fixture.
+- The training negatives are **not class-balanced and cannot be made so**. When2Call contributes 481 `request_for_info`, 509 `cannot_answer` and just **10 `direct`** rows, so any balanced subset is capped at ten examples per class. The word "balanced" was removed rather than quietly oversampling a class the benchmark barely contains.
+
 ## Results
 
-> **These numbers come from `MODE=smoke`, which uses scripted backends, not a trained model.** They validate the pipeline and the metric layer end to end; they are *not* research results. Re-run with `MODE=full` on a GPU to replace them. See `results/cv_metrics.md`.
+> **No model numbers exist yet.** Every figure in `results/` was produced by `MODE=smoke`, which uses *scripted backends* rather than a trained model. They validate the pipeline and the metric layer end to end; they are **not** research results. Run `MODE=full` on a GPU to produce the real ones.
 
-| Metric | Base | Tool-SFT | Reliable Tool-SFT |
-|---|---:|---:|---:|
-| Exact tool-call match | 30.0% | 100.0% | 81.0% |
-| Function-name accuracy | 30.0% | 100.0% | 81.0% |
-| Argument accuracy | 30.0% | 100.0% | 81.0% |
-| JSON validity | 100.0% | 100.0% | 100.0% |
-| Held-out function EM | 32.0% | 100.0% | 78.0% |
-| When2Call decision accuracy | 72.5% | 25.0% | 35.6% |
-| False tool-call rate (lower better) | 22.5% | 66.7% | 57.5% |
-| Missing-info accuracy | 70.0% | 0.0% | 22.5% |
-| Cannot-answer accuracy | 70.0% | 0.0% | 20.0% |
+The generated table lives in `results/comparison.md` and `results/comparison.csv`, written by `src/aggregate_results.py` on every run. It is deliberately **not** reproduced here: the smoke numbers move with `N_EVAL` and with the backend's `--failure-rate`, so a hand-copied table in this file goes stale the moment anyone re-runs — which is how the earlier version of this README came to disagree with its own results directory.
 
-The smoke run reproduces the *shape* of the failure the project is built to detect: the positive-only backend (Tool-SFT) drives tool-call accuracy to 100% while its false tool-call rate climbs from 22.5% to 66.7%. That is the trade-off the real experiment is designed to measure.
+What the smoke run does establish is that the harness detects the failure the project is built around. The positive-only backend drives tool-call accuracy to 100% while its false tool-call rate rises from 22.5% to 66.7% — the exact trade-off the real experiment is designed to measure on a trained model.
 
 ## Key finding
 
@@ -56,10 +53,10 @@ The smoke run reproduces the *shape* of the failure the project is built to dete
 
 ## Reproduction
 
-Smoke run — no GPU, no downloads, validates the whole pipeline:
+Smoke run — no GPU, no downloads, validates the whole pipeline. `N_EVAL` controls how many eval rows each split contributes and therefore the exact percentages:
 
 ```bash
-MODE=smoke ./scripts/run_experiments.sh
+MODE=smoke N_EVAL=150 ./scripts/run_experiments.sh
 ```
 
 Full run — needs a GPU (Colab L4/A100), network, and the Hub datasets:
@@ -68,14 +65,21 @@ Full run — needs a GPU (Colab L4/A100), network, and the Hub datasets:
 MODE=full ./scripts/run_experiments.sh
 ```
 
-Individual stages:
+Individual stages — note that both training arms read the same `data/processed` corpus:
 
 ```bash
-python -m src.data.build_dataset --source glaive --out data/processed --n-train 3000 --n-eval 500 --seed 0
-python -m src.data.prepare_when2call --mode train --n 1000 --out data/raw/w2c_train.jsonl
+# 1. one shared corpus: ~3000 positives + ~1000 negatives, all three eval splits
+python -m src.data.build_dataset --source glaive,when2call --out data/processed \
+    --n-train 4000 --n-eval 250 --neg-ratio 0.25 --seed 0
+
+# 2. the When2Call test split, for the decision track
 python -m src.data.prepare_when2call --mode eval --out data/raw/w2c_eval.jsonl
-python -m src.train_qlora --config configs/tool_sft.yaml --data data/processed --variant sft --out outputs/tool_sft
-python -m src.train_qlora --config configs/reliable_tool_sft.yaml --data data/reliable --variant sft-neg --out outputs/reliable_tool_sft
+
+# 3. both arms from the same corpus; --variant selects which rows are used
+python -m src.train_qlora --config configs/tool_sft.yaml \
+    --data data/processed --variant sft --out outputs/tool_sft
+python -m src.train_qlora --config configs/reliable_tool_sft.yaml \
+    --data data/processed --variant sft-neg --out outputs/reliable_tool_sft
 ```
 
 The scorer is verified against a perfect oracle before any model is trusted — a step that caught a real classifier bug during development (see below).
@@ -111,9 +115,11 @@ During development the oracle sanity check scored 93.75% instead of 100%, which 
 
 ## Limitations
 
-- The full training run has **not** been executed in this environment: `torch`, `transformers` and `peft` are not installed and no GPU is available. Everything up to and including the metric layer is exercised; the model numbers are not yet produced.
-- The synthetic corpus under `data/processed` is a pipeline fixture, not a substitute for Glaive/When2Call.
-- `prepare_when2call.py` parses the published When2Call field shapes defensively and logs skip counts; run it once on the real data and check the stats.
+- The full training run has **not** been executed in this environment: `torch`, `transformers` and `peft` are not installed and no GPU is available. Everything up to and including the data layer is exercised against the real Hub corpora; the model numbers are not yet produced.
+- Under `MODE=smoke` the corpus is synthetic and is a pipeline fixture only. Under `MODE=full`, `data/processed` is the real shared Glaive + When2Call corpus, verified to build 4000 train / 249 eval rows across all three splits (`heldout_tools`, `unseen_functions`, `no_tool`).
+- The two arms differ in record count (3000 vs 4000) as well as in content, because the added negatives *are* the treatment. Both run the same 3 epochs, so gradient-step count differs slightly — that is part of the intervention, not a controlled quantity.
+- `direct` accuracy is not measurable on the real When2Call test split (no gold-`direct` rows), and the training negatives are capped at 10 `direct` rows by the benchmark itself. See the Evaluation section.
+- The `direct` / `request_for_info` / `cannot_answer` split is heuristic cue matching over prose. `classification_source` is stored per example so the share of decisions resting on the heuristic can be audited; on real When2Call prose the cue lists may still need widening.
 
 ## Acknowledgements
 

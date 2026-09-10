@@ -69,31 +69,38 @@ if [ "${MODE}" = "smoke" ]; then
       --n-per-class 40 \
       --seed "${SEED}"
 else
-  # Positive tool-call data (Glaive). Falls back to Hermes if needed.
+  # ONE corpus, shared by both training variants.
+  #
+  # This replaces two separately-built corpora, which carried two defects that
+  # each invalidated the comparison on their own:
+  #
+  #  * Cross-contamination. Each corpus carved its own eval set out of the same
+  #    shuffled Glaive pool, so 40 of 166 tool-call eval rows were training rows
+  #    for the OTHER variant. All three checkpoints are scored on one eval set,
+  #    so one model was graded on rows it had already memorised.
+  #  * No negatives. The reliable corpus was built with --source glaive alone,
+  #    and Glaive contains no no-tool rows at all. --neg-ratio 0.25 therefore
+  #    resolved to zero negatives ("only 0 negatives available"), so
+  #    Reliable Tool-SFT would have trained on exactly the same positives-only
+  #    data as Tool-SFT. The two checkpoints would be identical and the headline
+  #    claim about negative supervision vacuous.
+  #
+  # Building once and letting --variant choose the rows means both checkpoints
+  # see an identical positive set and differ only by the negatives, which is the
+  # experimental variable. It also gives the tool-call track a no_tool split to
+  # measure a false-call rate against, which a Glaive-only corpus cannot do.
   "${PY}" -msrc.data.build_dataset \
-      --source glaive \
+      --source glaive,when2call \
       --out "${DATA}/processed" \
-      --n-train "${N_TRAIN}" \
-      --n-eval "${N_EVAL}" \
-      --neg-ratio 0.0 \
-      --seed "${SEED}"
-
-  # When2Call: balanced training subset + the real test split.
-  "${PY}" -msrc.data.prepare_when2call \
-      --mode train --n "${N_W2C_TRAIN}" \
-      --out "${DATA}/raw/w2c_train.jsonl" --seed "${SEED}"
-  "${PY}" -msrc.data.prepare_when2call \
-      --mode eval \
-      --out "${DATA}/raw/w2c_eval.jsonl"
-
-  # Reliable Tool-SFT corpus = positives + balanced When2Call decisions.
-  "${PY}" -msrc.data.build_dataset \
-      --source glaive \
-      --out "${DATA}/reliable" \
       --n-train "$((N_TRAIN + N_W2C_TRAIN))" \
       --n-eval "${N_EVAL}" \
       --neg-ratio 0.25 \
       --seed "${SEED}"
+
+  # When2Call test split, for the four-way decision track.
+  "${PY}" -msrc.data.prepare_when2call \
+      --mode eval \
+      --out "${DATA}/raw/w2c_eval.jsonl"
 fi
 
 "${PY}" -mpytest tests/ -q
@@ -110,9 +117,12 @@ if [ "${MODE}" = "full" ]; then
       --out "${OUTPUTS}/tool_sft"
 
   echo "-- [3/6] training Reliable Tool-SFT"
+  # Same corpus as Tool-SFT. --variant sft-neg keeps the negatives and drops
+  # nothing, so the only difference between the two checkpoints is the presence
+  # of the ~1K no-tool / clarification / refusal examples.
   "${PY}" -msrc.train_qlora \
       --config configs/reliable_tool_sft.yaml \
-      --data "${DATA}/reliable" \
+      --data "${DATA}/processed" \
       --variant sft-neg \
       --out "${OUTPUTS}/reliable_tool_sft"
 else

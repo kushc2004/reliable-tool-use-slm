@@ -1,8 +1,8 @@
 {
   "overall": {
-    "n": 150,
-    "n_call_expected": 100,
-    "n_no_tool": 50,
+    "n": 120,
+    "n_call_expected": 80,
+    "n_no_tool": 40,
     "json_validity": 1.0,
     "tool_selection_accuracy": 1.0,
     "argument_accuracy": 1.0,
@@ -16,8 +16,8 @@
   },
   "by_split": {
     "heldout_tools": {
-      "n": 50,
-      "n_call_expected": 50,
+      "n": 40,
+      "n_call_expected": 40,
       "n_no_tool": 0,
       "json_validity": 1.0,
       "tool_selection_accuracy": 1.0,
@@ -31,9 +31,9 @@
       "malformed_blocks": 0
     },
     "no_tool": {
-      "n": 50,
+      "n": 40,
       "n_call_expected": 0,
-      "n_no_tool": 50,
+      "n_no_tool": 40,
       "json_validity": 1.0,
       "tool_selection_accuracy": null,
       "argument_accuracy": null,
@@ -46,8 +46,8 @@
       "malformed_blocks": 0
     },
     "unseen_functions": {
-      "n": 50,
-      "n_call_expected": 50,
+      "n": 40,
+      "n_call_expected": 40,
       "n_no_tool": 0,
       "json_validity": 1.0,
       "tool_selection_accuracy": 1.0,

@@ -17,15 +17,37 @@ def tracked() -> set[str]:
     out = subprocess.run(["git", "ls-files"], capture_output=True, text=True).stdout
     return {line for line in out.splitlines() if line}
 
-EXCLUDE_DIRS = {"data", "outputs", "runs", "__pycache__", ".pytest_cache", ".git"}
+# Whole trees that are generated, not source. Listed as path PREFIXES rather
+# than bare directory names so the intent is legible and so a name like
+# "output" cannot accidentally swallow an unrelated directory of the same name.
+#
+# "kaggle/output" is what `kaggle kernels output` downloads: a nested clone of
+# this repo plus its result artifacts. Every file under it is legitimately
+# untracked, and listing it here is why this check does not report ~25 false
+# positives from that clone.
+EXCLUDE_PREFIXES = (
+    "data/",
+    "outputs/",
+    "runs/",
+    "kaggle/output/",
+    "__pycache__/",
+    ".pytest_cache/",
+    ".git/",
+)
+
+def _excluded(path: pathlib.Path) -> bool:
+    rel = path.as_posix()
+    return any(
+        rel.startswith(prefix) or f"/{prefix}" in f"/{rel}"
+        for prefix in EXCLUDE_PREFIXES
+    )
 
 def on_disk(suffixes: tuple[str, ...]) -> set[str]:
     found = set()
     for path in pathlib.Path(".").rglob("*"):
         if not path.is_file() or path.suffix not in suffixes:
             continue
-        parts = path.parts
-        if any(part in EXCLUDE_DIRS for part in parts):
+        if _excluded(path):
             continue
         found.add(str(path))
     return found

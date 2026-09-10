@@ -36,7 +36,17 @@ logging_steps: 10
 # Reproducibility
 seed: 0
 
-# Data
-data_source: glaive
-n_train: 3000
-neg_ratio: 0.0
+# Data.
+#
+# Both variants read the SAME shared corpus (data/processed) and are separated
+# by --variant, not by corpus. Train-SFT and Reliable Tool-SFT must see an
+# identical positive set so the only difference between them is the negatives.
+#
+# This model is the positive-only arm: variant "sft" drops every no-tool record,
+# yielding ~3000 positives from the shared 4000-row corpus.
+data_source: glaive,when2call
+corpus: data/processed
+variant: sft
+n_train_total: 4000        # shared corpus size
+n_train_effective: 3000    # after the positive-only filter
+neg_ratio: 0.25            # ratio used to build the shared corpus

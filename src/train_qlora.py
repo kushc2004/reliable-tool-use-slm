@@ -114,10 +114,14 @@ def _load_records(data_dir: Path, variant: str) -> list[dict[str, Any]]:
     elif variant == "sft-neg":
         negatives = [r for r in records if not r.get("expects_call")]
         positives = [r for r in records if r.get("expects_call")]
-        # Oversample negatives 2x: they are the minority and the behaviour we
-        # are actually trying to install.
-        records = positives + negatives * 2
-        print(f"[sft-neg] {len(positives)} positive + {len(negatives)} negative (x2 oversampled)")
+        # No oversampling. An earlier version repeated the negatives twice,
+        # which silently doubled the negative signal and made this variant 5000
+        # records against the positive-only variant's 3000 -- so "more data"
+        # and "more gradient steps" were confounded with the actual variable,
+        # which is the presence of negative supervision. The corpus is now
+        # built at the intended ratio (neg_ratio 0.25) and used as-is.
+        records = positives + negatives
+        print(f"[sft-neg] {len(positives)} positive + {len(negatives)} negative")
     else:
         raise SystemExit(f"unknown variant: {variant} (expected sft or sft-neg)")
 
