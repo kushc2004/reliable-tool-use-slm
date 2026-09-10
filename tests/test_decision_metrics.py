@@ -71,10 +71,33 @@ def test_request_for_info_phrasing(text):
         "I can't provide that; none of the available functions cover air quality data.",
         "Sorry, that is outside my capabilities - I have no parcel tracking function.",
         "I don't have access to recipe data, so I can't help with that request.",
+        # The adverb slot. These are the dominant real phrasing in When2Call and
+        # were the single largest source of oracle mismatches (110 of 176).
+        "I'm sorry for the inconvenience, but I'm currently unable to provide that.",
+        "I am currently unable to perform web searches.",
+        "I'm now not able to access that data.",
+        "I couldn't find a matching record.",
+        "I don't have the capability to check application versions.",
+        "抱歉，我无法提供实时天气信息。",
     ],
 )
 def test_cannot_answer_phrasing(text):
     assert classify_prediction(text)[0] == "cannot_answer"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "To proceed, I need to know the status of the order.",
+        "To proceed, I'll need to know which items you'd like.",
+        "How many bathrooms are you looking for in the property?",
+        "Which action should I take here?",
+        "What do you need help with today?",
+    ],
+)
+def test_request_for_info_procedural_phrasing(text):
+    """The second-largest error family: procedural clarification frames."""
+    assert classify_prediction(text)[0] == "request_for_info"
 
 
 @pytest.mark.parametrize(

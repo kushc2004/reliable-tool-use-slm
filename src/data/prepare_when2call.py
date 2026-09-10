@@ -9,6 +9,16 @@ has one of four correct behaviours::
                       ask for it instead of inventing a value
     cannot_answer     nothing on offer can satisfy the request -> say so
 
+Gold call shapes
+----------------
+Two, and both must be handled -- see ``_extract_gold_calls``::
+
+    train_pref   <TOOLCALL>[{"name": ..., "arguments": {...}}]</TOOLCALL>
+    mcq          {"name": ..., "arguments": {...}}          (no tag)
+
+The evaluation split is the untagged one. A parser that required the tag read
+zero calls from all 3,652 eval rows.
+
 Access pattern
 --------------
 The dataset is **config-scoped**, which the first version of this loader got
@@ -118,43 +128,8 @@ def _normalize_tools(raw: Any) -> list[dict[str, Any]]:
     return tools
 
 
-def classify_gold_response(text: str) -> str:
-    """Infer the four-way decision from a gold assistant turn.
-
-    Needed because ``train_sft`` and ``train_pref`` carry no
-    ``correct_answer`` field -- only the behaviour itself. A call is detected
-    by the ``<TOOLCALL>`` tag; the three non-call behaviours are separated by
-    ordered cue matching, with clarification taking priority over refusal.
-    """
-    if not text or not text.strip():
-        return "cannot_answer"
-    if _TOOLCALL_RE.search(text):
-        return "tool_call"
-    if _REQUEST_CUES.search(text):
-        return "request_for_info"
-    if _CANNOT_CUES.search(text):
-        return "cannot_answer"
-    return "direct"
-
-
-def _extract_gold_calls(text: str) -> list[dict[str, Any]]:
-    """Pull calls out of a ``<TOOLCALL>[{...}]</TOOLCALL>`` block.
-
-    The payload is a JSON *array* of call objects, which is why the generic
-    ``parse_tool_calls`` (built for one object per block) is not used directly:
-    re-wrapping each element as its own block keeps a single parser in play.
-    """
-    match = _TOOLCALL_RE.search(text or "")
-    if not match:
-        return []
-    body = match.group(0)
-    body = re.sub(r"</?TOOLCALL>", "", body, flags=re.IGNORECASE).strip()
-    try:
-        payload = json.loads(body)
-    except (json.JSONDecodeError, ValueError):
-        return list(parse_tool_calls(body).calls and
-                    [c.to_dict() for c in parse_tool_calls(body).calls])
-
+def _coerce_payload(payload: Any) -> list[dict[str, Any]]:
+    """Turn a decoded JSON payload -- an object or an array -- into call dicts."""
     if isinstance(payload, dict):
         payload = [payload]
     if not isinstance(payload, list):
@@ -164,6 +139,9 @@ def _extract_gold_calls(text: str) -> list[dict[str, Any]]:
     for item in payload:
         if not isinstance(item, dict):
             continue
+        # Tolerate {"function": {"name": ...}} nesting.
+        if "name" not in item and isinstance(item.get("function"), dict):
+            item = item["function"]
         name = item.get("name")
         if not name:
             continue
@@ -175,6 +153,85 @@ def _extract_gold_calls(text: str) -> list[dict[str, Any]]:
                 args = {"value": args}
         calls.append({"name": name, "arguments": args})
     return calls
+
+
+def _extract_embedded_json(body: str) -> Any | None:
+    """Decode the first JSON value in ``body``, tolerating surrounding prose.
+
+    Uses ``raw_decode`` from the first brace rather than a regex, so nested
+    objects are handled correctly instead of being truncated at the first
+    closing brace.
+    """
+    starts = [i for i in (body.find("{"), body.find("[")) if i != -1]
+    if not starts:
+        return None
+    try:
+        value, _ = json.JSONDecoder().raw_decode(body[min(starts):])
+        return value
+    except (json.JSONDecodeError, ValueError):
+        return None
+
+
+def _extract_gold_calls(text: str) -> list[dict[str, Any]]:
+    """Pull calls out of a gold answer string, in **either** published shape.
+
+    When2Call writes its gold calls two different ways, and both must work:
+
+    * ``train_pref`` wraps a JSON **array** in ``<TOOLCALL>...</TOOLCALL>``.
+    * ``mcq`` -- the evaluation split -- stores a bare JSON **object** with no
+      tag at all.
+
+    Requiring the tag meant every eval ``tool_call`` row parsed to zero calls.
+    The oracle then scored 0% on that category (all 1,295 rows misread as
+    ``direct``) and the entire decision track was measuring nothing -- which is
+    exactly what the oracle self-check is for.
+    """
+    text = text or ""
+    match = _TOOLCALL_RE.search(text)
+    body = (
+        re.sub(r"</?TOOLCALL>", "", match.group(0), flags=re.IGNORECASE).strip()
+        if match
+        else text.strip()
+    )
+    if not body:
+        return []
+
+    # Whole string is one JSON value: the mcq case, and the well-formed tagged case.
+    try:
+        return _coerce_payload(json.loads(body))
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    # A properly delimited call block inside prose.
+    parsed = [call.to_dict() for call in parse_tool_calls(body).calls]
+    if parsed:
+        return parsed
+
+    # A call object embedded in prose, with no delimiters at all.
+    embedded = _extract_embedded_json(body)
+    if embedded is not None:
+        return _coerce_payload(embedded)
+    return []
+
+
+def classify_gold_response(text: str) -> str:
+    """Infer the four-way decision from a gold assistant turn.
+
+    Needed because ``train_sft`` and ``train_pref`` carry no ``correct_answer``
+    field -- only the behaviour itself. A call is detected by attempting to
+    extract one, which handles both the tagged and untagged gold shapes; the
+    three non-call behaviours are separated by ordered cue matching, with
+    clarification taking priority over refusal.
+    """
+    if not text or not text.strip():
+        return "cannot_answer"
+    if _extract_gold_calls(text):
+        return "tool_call"
+    if _REQUEST_CUES.search(text):
+        return "request_for_info"
+    if _CANNOT_CUES.search(text):
+        return "cannot_answer"
+    return "direct"
 
 
 def load_rows(
