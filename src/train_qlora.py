@@ -141,10 +141,22 @@ def train(config: dict[str, Any], data_dir: Path, variant: str, out_dir: Path) -
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
+    # bfloat16 needs Ampere (A100/L4/3090+) or newer. On Turing (T4, Kaggle and
+    # Colab's free tier) there is no native bf16 and requesting it silently
+    # produces broken gradients rather than an error -- so pick fp16 there.
+    if torch.cuda.is_available():
+        supports_bf16 = torch.cuda.is_bf16_supported()
+        compute_dtype = torch.bfloat16 if supports_bf16 else torch.float16
+        device_name = torch.cuda.get_device_name(0)
+        print(f"[device] {device_name} | bf16 supported: {supports_bf16} "
+              f"| compute dtype: {compute_dtype}")
+    else:
+        compute_dtype = torch.float32
+
     quant_config = BitsAndBytesConfig(
         load_in_4bit=True,
         bnb_4bit_quant_type="nf4",
-        bnb_4bit_compute_dtype=torch.bfloat16,
+        bnb_4bit_compute_dtype=compute_dtype,
         bnb_4bit_use_double_quant=True,
     )
 
@@ -152,7 +164,7 @@ def train(config: dict[str, Any], data_dir: Path, variant: str, out_dir: Path) -
         model_name,
         quantization_config=quant_config,
         device_map="auto",
-        torch_dtype=torch.bfloat16,
+        torch_dtype=compute_dtype,
         trust_remote_code=True,
     )
     model.config.use_cache = False
@@ -185,7 +197,8 @@ def train(config: dict[str, Any], data_dir: Path, variant: str, out_dir: Path) -
         warmup_ratio=config.get("warmup_ratio", 0.03),
         logging_steps=config.get("logging_steps", 10),
         save_strategy="epoch",
-        bf16=torch.cuda.is_available(),
+        bf16=torch.cuda.is_available() and torch.cuda.is_bf16_supported(),
+        fp16=torch.cuda.is_available() and not torch.cuda.is_bf16_supported(),
         gradient_checkpointing=config.get("gradient_checkpointing", True),
         report_to=[],
         seed=config.get("seed", 0),
@@ -201,9 +214,32 @@ def train(config: dict[str, Any], data_dir: Path, variant: str, out_dir: Path) -
     trainer.save_model(str(out_dir))
     tokenizer.save_pretrained(str(out_dir))
 
-    with (out_dir / "run_config.json").open("w", encoding="utf-8") as handle:
-        json.dump({"config": config, "variant": variant, "n_records": len(records)}, handle, indent=2)
+    # Record the hardware and the dtype actually used, so a result can be traced
+    # back to the conditions that produced it.
+    n_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    n_total = sum(p.numel() for p in model.parameters())
+    peak_mem_gb = None
+    if torch.cuda.is_available():
+        peak_mem_gb = round(torch.cuda.max_memory_allocated() / 1024 ** 3, 2)
 
+    run_meta = {
+        "config": config,
+        "variant": variant,
+        "n_records": len(records),
+        "trainable_params": n_trainable,
+        "total_params": n_total,
+        "trainable_pct": round(100 * n_trainable / n_total, 3) if n_total else None,
+        "compute_dtype": str(compute_dtype),
+        "device": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu",
+        "peak_gpu_mem_gb": peak_mem_gb,
+    }
+    with (out_dir / "run_config.json").open("w", encoding="utf-8") as handle:
+        json.dump(run_meta, handle, indent=2)
+
+    print(f"trainable params: {n_trainable:,} / {n_total:,} "
+          f"({run_meta['trainable_pct']}%)")
+    if peak_mem_gb:
+        print(f"peak GPU memory: {peak_mem_gb} GB")
     print(f"saved adapter to {out_dir}")
 
 
