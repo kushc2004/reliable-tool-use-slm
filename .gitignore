@@ -1,20 +1,25 @@
+# NOTE: every path pattern here is ROOT-ANCHORED (leading "/").
+# An unanchored "data/" also matches "src/data/", which silently excluded the
+# entire data package from the first commit and broke the Kaggle run.
+# Keep the leading slash.
+
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .ipynb_checkpoints/
 
-# Data and artifacts (regenerate with src/data/build_dataset.py)
-data/
-runs/
-outputs/
-*.jsonl
+# Generated corpora and training artifacts (regenerate with src/data/build_dataset.py)
+/data/
+/outputs/
+/runs/
 *.safetensors
 *.bin
 
-# Results ARE committed: comparison.csv, figures/, error_analysis.json,
+# Results ARE committed: comparison.csv, figures/, error_analysis.json and
 # cv_metrics.md are deliverables. Only bulky per-example dumps are excluded.
-results/*/predictions.jsonl
-results/*failures.jsonl
+/results/*/predictions.jsonl
+/results/*failures.jsonl
+/results/*/failures.jsonl
 
 # Local
 .venv/
