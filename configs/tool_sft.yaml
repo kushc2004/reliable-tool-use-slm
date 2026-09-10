@@ -1,0 +1,42 @@
+# Model B -- Tool-SFT: positive tool-call trajectories only.
+# Hyperparameters follow the upstream XIECHENG6/small-llms-tool-use QLoRA config.
+name: tool_sft
+model_name: Qwen/Qwen2.5-1.5B-Instruct
+output_dir: outputs/tool_sft
+variant: sft
+
+# QLoRA (4-bit NF4 + LoRA)
+load_in_4bit: true
+bnb_4bit_quant_type: nf4
+bnb_4bit_compute_dtype: bfloat16
+bnb_4bit_use_double_quant: true
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.05
+target_modules:
+  - q_proj
+  - k_proj
+  - v_proj
+  - o_proj
+  - gate_proj
+  - up_proj
+  - down_proj
+
+# Optimisation
+learning_rate: 2.0e-4
+num_train_epochs: 3
+per_device_train_batch_size: 4
+gradient_accumulation_steps: 4      # effective batch size 16
+max_length: 512
+lr_scheduler_type: cosine
+warmup_ratio: 0.03
+gradient_checkpointing: true
+logging_steps: 10
+
+# Reproducibility
+seed: 0
+
+# Data
+data_source: glaive
+n_train: 3000
+neg_ratio: 0.0

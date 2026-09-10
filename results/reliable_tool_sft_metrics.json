@@ -1,0 +1,64 @@
+{
+  "overall": {
+    "n": 150,
+    "n_call_expected": 100,
+    "n_no_tool": 50,
+    "json_validity": 1.0,
+    "tool_selection_accuracy": 0.81,
+    "argument_accuracy": 0.81,
+    "exact_match": 0.81,
+    "unseen_function_accuracy": 0.78,
+    "false_tool_call_rate": 0.74,
+    "no_tool_accuracy": 0.26,
+    "call_recall": 0.81,
+    "call_precision": 1.0,
+    "malformed_blocks": 0
+  },
+  "by_split": {
+    "heldout_tools": {
+      "n": 50,
+      "n_call_expected": 50,
+      "n_no_tool": 0,
+      "json_validity": 1.0,
+      "tool_selection_accuracy": 0.84,
+      "argument_accuracy": 0.84,
+      "exact_match": 0.84,
+      "unseen_function_accuracy": null,
+      "false_tool_call_rate": null,
+      "no_tool_accuracy": null,
+      "call_recall": 0.84,
+      "call_precision": 1.0,
+      "malformed_blocks": 0
+    },
+    "no_tool": {
+      "n": 50,
+      "n_call_expected": 0,
+      "n_no_tool": 50,
+      "json_validity": 1.0,
+      "tool_selection_accuracy": null,
+      "argument_accuracy": null,
+      "exact_match": null,
+      "unseen_function_accuracy": null,
+      "false_tool_call_rate": 0.74,
+      "no_tool_accuracy": 0.26,
+      "call_recall": null,
+      "call_precision": null,
+      "malformed_blocks": 0
+    },
+    "unseen_functions": {
+      "n": 50,
+      "n_call_expected": 50,
+      "n_no_tool": 0,
+      "json_validity": 1.0,
+      "tool_selection_accuracy": 0.78,
+      "argument_accuracy": 0.78,
+      "exact_match": 0.78,
+      "unseen_function_accuracy": 0.78,
+      "false_tool_call_rate": null,
+      "no_tool_accuracy": null,
+      "call_recall": 0.78,
+      "call_precision": 1.0,
+      "malformed_blocks": 0
+    }
+  }
+}

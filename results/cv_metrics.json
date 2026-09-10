@@ -1,0 +1,85 @@
+{
+  "runs": {
+    "base": {
+      "exact_match": 0.3,
+      "tool_selection_accuracy": 0.3,
+      "argument_accuracy": 0.3,
+      "json_validity": 1.0,
+      "unseen_function_accuracy": 0.32,
+      "false_tool_call_rate": 0.32,
+      "when2call_decision_accuracy": 0.725,
+      "when2call_false_tool_call_rate": 0.225,
+      "when2call_missing_info_accuracy": 0.575,
+      "n_tool_eval": 150,
+      "n_when2call": 160
+    },
+    "tool_sft": {
+      "exact_match": 1.0,
+      "tool_selection_accuracy": 1.0,
+      "argument_accuracy": 1.0,
+      "json_validity": 1.0,
+      "unseen_function_accuracy": 1.0,
+      "false_tool_call_rate": 1.0,
+      "when2call_decision_accuracy": 0.25,
+      "when2call_false_tool_call_rate": 0.6666666666666666,
+      "when2call_missing_info_accuracy": 0.0,
+      "n_tool_eval": 150,
+      "n_when2call": 160
+    },
+    "reliable_tool_sft": {
+      "exact_match": 0.81,
+      "tool_selection_accuracy": 0.81,
+      "argument_accuracy": 0.81,
+      "json_validity": 1.0,
+      "unseen_function_accuracy": 0.78,
+      "false_tool_call_rate": 0.74,
+      "when2call_decision_accuracy": 0.35625,
+      "when2call_false_tool_call_rate": 0.575,
+      "when2call_missing_info_accuracy": 0.175,
+      "n_tool_eval": 150,
+      "n_when2call": 160
+    }
+  },
+  "headline": {
+    "exact_match_gain_abs": 0.51,
+    "exact_match_gain_rel": 1.7000000000000002,
+    "false_call_drop_abs": 0.35,
+    "decision_accuracy_gain_abs": -0.36874999999999997
+  },
+  "data": {
+    "sources": [
+      "synth"
+    ],
+    "seed": 0,
+    "n_train_requested": 3000,
+    "neg_ratio": 0.0,
+    "train": {
+      "n": 3000,
+      "by_split": {
+        "train": 3000
+      },
+      "by_category": {
+        "tool_call": 2850,
+        "parallel_calls": 150
+      },
+      "call_expected": 3000,
+      "no_call_expected": 0
+    },
+    "eval": {
+      "n": 150,
+      "by_split": {
+        "unseen_functions": 50,
+        "heldout_tools": 50,
+        "no_tool": 50
+      },
+      "by_category": {
+        "tool_call": 100,
+        "no_tool_needed": 34,
+        "insufficient_arguments": 16
+      },
+      "call_expected": 100,
+      "no_call_expected": 50
+    },
+    "dropped": {}
+  }
+}

@@ -1,0 +1,47 @@
+# Model C -- Reliable Tool-SFT: the same positives plus When2Call decision
+# supervision (tool_call / direct / request_for_info / cannot_answer).
+#
+# Trained independently from the SAME base model as tool_sft, not continued from
+# it, so the two checkpoints differ only in the data they saw.
+name: reliable_tool_sft
+model_name: Qwen/Qwen2.5-1.5B-Instruct
+output_dir: outputs/reliable_tool_sft
+variant: sft-neg
+
+# QLoRA -- identical to tool_sft so the comparison is clean
+load_in_4bit: true
+bnb_4bit_quant_type: nf4
+bnb_4bit_compute_dtype: bfloat16
+bnb_4bit_use_double_quant: true
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.05
+target_modules:
+  - q_proj
+  - k_proj
+  - v_proj
+  - o_proj
+  - gate_proj
+  - up_proj
+  - down_proj
+
+# Optimisation -- identical to tool_sft
+learning_rate: 2.0e-4
+num_train_epochs: 3
+per_device_train_batch_size: 4
+gradient_accumulation_steps: 4
+max_length: 512
+lr_scheduler_type: cosine
+warmup_ratio: 0.03
+gradient_checkpointing: true
+logging_steps: 10
+
+# Reproducibility
+seed: 0
+
+# Data: ~3K Glaive positives + ~1K balanced When2Call decision examples.
+# neg-ratio 0.25 gives roughly 3000 positives + 1000 negatives.
+data_source: glaive,when2call
+n_train: 4000
+n_when2call: 1000
+neg_ratio: 0.25

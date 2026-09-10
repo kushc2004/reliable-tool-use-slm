@@ -1,0 +1,16 @@
+# Core training / inference
+torch>=2.2
+transformers>=4.44
+peft>=0.11
+bitsandbytes>=0.43          ; platform_system != "Darwin"
+accelerate>=0.33
+datasets>=2.20
+safetensors>=0.4
+
+# Utilities
+PyYAML>=6.0
+tqdm>=4.66
+numpy>=1.26
+
+# Tests
+pytest>=8.0

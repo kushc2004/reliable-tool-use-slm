@@ -1,0 +1,23 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Data and artifacts (regenerate with src/data/build_dataset.py)
+data/
+runs/
+outputs/
+*.jsonl
+*.safetensors
+*.bin
+
+# Results ARE committed: comparison.csv, figures/, error_analysis.json,
+# cv_metrics.md are deliverables. Only bulky per-example dumps are excluded.
+results/*/predictions.jsonl
+results/*failures.jsonl
+
+# Local
+.venv/
+venv/
+.env
+.DS_Store

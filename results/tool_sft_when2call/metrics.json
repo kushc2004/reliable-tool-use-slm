@@ -1,0 +1,44 @@
+{
+  "n": 160,
+  "decision_accuracy": 0.25,
+  "macro_f1": 0.125,
+  "tool_call_precision": 0.3333333333333333,
+  "tool_call_recall": 1.0,
+  "false_tool_call_rate": 0.6666666666666666,
+  "missing_info_accuracy": 0.0,
+  "cannot_answer_accuracy": 0.0,
+  "direct_accuracy": 0.0,
+  "json_validity": 1.0,
+  "n_gold_tool_call": 40,
+  "n_gold_non_call": 120,
+  "classification_source_counts": {
+    "default_direct": 40,
+    "tool_call": 120
+  },
+  "confusion_matrix": {
+    "tool_call": {
+      "tool_call": 40,
+      "direct": 0,
+      "request_for_info": 0,
+      "cannot_answer": 0
+    },
+    "direct": {
+      "tool_call": 40,
+      "direct": 0,
+      "request_for_info": 0,
+      "cannot_answer": 0
+    },
+    "request_for_info": {
+      "tool_call": 40,
+      "direct": 0,
+      "request_for_info": 0,
+      "cannot_answer": 0
+    },
+    "cannot_answer": {
+      "tool_call": 0,
+      "direct": 40,
+      "request_for_info": 0,
+      "cannot_answer": 0
+    }
+  }
+}

@@ -1,0 +1,176 @@
+{
+  "counts": {
+    "wrong_tool": 0,
+    "malformed_json": 0,
+    "wrong_argument_value": 0,
+    "missing_argument": 89,
+    "hallucinated_argument": 0,
+    "unnecessary_tool_call": 196,
+    "should_request_info": 83,
+    "unsupported_request": 84
+  },
+  "total_failures_observed": 452,
+  "n_examples": 20,
+  "examples": [
+    {
+      "track": "tool_call",
+      "checkpoint": "base",
+      "id": "eval-unseen-00008",
+      "split": "unseen_functions",
+      "category": "missing_argument",
+      "prediction": "I'm not sure which function to use."
+    },
+    {
+      "track": "tool_call",
+      "checkpoint": "base",
+      "id": "eval-held-00002",
+      "split": "heldout_tools",
+      "category": "missing_argument",
+      "prediction": "I'm not sure which function to use."
+    },
+    {
+      "track": "tool_call",
+      "checkpoint": "base",
+      "id": "eval-held-00009",
+      "split": "heldout_tools",
+      "category": "missing_argument",
+      "prediction": "I'm not sure which function to use."
+    },
+    {
+      "track": "tool_call",
+      "checkpoint": "base",
+      "id": "eval-held-00027",
+      "split": "heldout_tools",
+      "category": "missing_argument",
+      "prediction": "I'm not sure which function to use."
+    },
+    {
+      "track": "tool_call",
+      "checkpoint": "base",
+      "id": "eval-held-00043",
+      "split": "heldout_tools",
+      "category": "missing_argument",
+      "prediction": "I'm not sure which function to use."
+    },
+    {
+      "track": "tool_call",
+      "checkpoint": "base",
+      "id": "eval-unseen-00040",
+      "split": "unseen_functions",
+      "category": "missing_argument",
+      "prediction": "I'm not sure which function to use."
+    },
+    {
+      "track": "tool_call",
+      "checkpoint": "base",
+      "id": "eval-notool-00045",
+      "split": "no_tool",
+      "category": "unnecessary_tool_call",
+      "prediction": "<tool_call>\n{\"name\": \"get_time\", \"arguments\": {}}\n</tool_call>"
+    },
+    {
+      "track": "tool_call",
+      "checkpoint": "base",
+      "id": "eval-held-00036",
+      "split": "heldout_tools",
+      "category": "missing_argument",
+      "prediction": "I'm not sure which function to use."
+    },
+    {
+      "track": "tool_call",
+      "checkpoint": "base",
+      "id": "eval-held-00045",
+      "split": "heldout_tools",
+      "category": "missing_argument",
+      "prediction": "I'm not sure which function to use."
+    },
+    {
+      "track": "tool_call",
+      "checkpoint": "base",
+      "id": "eval-unseen-00013",
+      "split": "unseen_functions",
+      "category": "missing_argument",
+      "prediction": "I'm not sure which function to use."
+    },
+    {
+      "track": "tool_call",
+      "checkpoint": "base",
+      "id": "eval-unseen-00019",
+      "split": "unseen_functions",
+      "category": "missing_argument",
+      "prediction": "I'm not sure which function to use."
+    },
+    {
+      "track": "tool_call",
+      "checkpoint": "base",
+      "id": "eval-notool-00015",
+      "split": "no_tool",
+      "category": "unnecessary_tool_call",
+      "prediction": "<tool_call>\n{\"name\": \"create_calendar_event\", \"arguments\": {}}\n</tool_call>"
+    },
+    {
+      "track": "tool_call",
+      "checkpoint": "base",
+      "id": "eval-held-00014",
+      "split": "heldout_tools",
+      "category": "missing_argument",
+      "prediction": "I'm not sure which function to use."
+    },
+    {
+      "track": "tool_call",
+      "checkpoint": "base",
+      "id": "eval-unseen-00018",
+      "split": "unseen_functions",
+      "category": "missing_argument",
+      "prediction": "I'm not sure which function to use."
+    },
+    {
+      "track": "tool_call",
+      "checkpoint": "base",
+      "id": "eval-unseen-00012",
+      "split": "unseen_functions",
+      "category": "missing_argument",
+      "prediction": "I'm not sure which function to use."
+    },
+    {
+      "track": "tool_call",
+      "checkpoint": "base",
+      "id": "eval-unseen-00022",
+      "split": "unseen_functions",
+      "category": "missing_argument",
+      "prediction": "I'm not sure which function to use."
+    },
+    {
+      "track": "tool_call",
+      "checkpoint": "base",
+      "id": "eval-notool-00014",
+      "split": "no_tool",
+      "category": "unnecessary_tool_call",
+      "prediction": "<tool_call>\n{\"name\": \"play_music\", \"arguments\": {}}\n</tool_call>"
+    },
+    {
+      "track": "tool_call",
+      "checkpoint": "base",
+      "id": "eval-unseen-00016",
+      "split": "unseen_functions",
+      "category": "missing_argument",
+      "prediction": "I'm not sure which function to use."
+    },
+    {
+      "track": "tool_call",
+      "checkpoint": "base",
+      "id": "eval-unseen-00032",
+      "split": "unseen_functions",
+      "category": "missing_argument",
+      "prediction": "I'm not sure which function to use."
+    },
+    {
+      "track": "tool_call",
+      "checkpoint": "base",
+      "id": "eval-held-00026",
+      "split": "heldout_tools",
+      "category": "missing_argument",
+      "prediction": "I'm not sure which function to use."
+    }
+  ]
+}
