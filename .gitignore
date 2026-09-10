@@ -21,6 +21,12 @@ __pycache__/
 /results/*failures.jsonl
 /results/*/failures.jsonl
 
+# Kaggle results pulled down with `kaggle kernels output`. Generated, and it
+# contains a nested clone of this repo -- git records that as a gitlink
+# (mode 160000), not as files, so committing it stores a dangling pointer to a
+# commit rather than any content. Re-fetch it when needed.
+/kaggle/output/
+
 # Local
 .venv/
 venv/
