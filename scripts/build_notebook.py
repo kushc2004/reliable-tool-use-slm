@@ -67,7 +67,7 @@ Code: [github.com/kushc2004/reliable-tool-use-slm](https://github.com/kushc2004/
 
 
 md("## 1. Environment")
-code(r'''import os, sys, subprocess, json, shutil, time
+code(r'''import os, sys, subprocess, json, shutil, time, zipfile
 from collections import Counter
 import torch
 
@@ -245,9 +245,15 @@ ARMS = [('base', None),
         ('tool_sft', 'outputs/tool_sft'),
         ('reliable_tool_sft', 'outputs/reliable_tool_sft')]
 
+# --backend hf IS REQUIRED. Both evaluators default to the "dummy" scripted
+# fixture, which reads the gold answer and degrades it on purpose -- so omitting
+# this flag produces a table that looks plausible and is entirely fake. An
+# earlier version of this notebook did exactly that, and all three arms came out
+# byte-identical because none of them loaded an adapter.
 for arm, adapter in ARMS:
     args = [sys.executable, '-m', 'src.evaluate',
             '--data', 'data/processed', '--split', 'all',
+            '--backend', 'hf',
             '--checkpoint', BASE, '--out', 'results/' + arm]
     if adapter:
         args += ['--adapter', adapter]
@@ -255,9 +261,21 @@ for arm, adapter in ARMS:
 
 
 md("## 10. Evaluate - When2Call decision track")
-code(r'''for arm, adapter in ARMS:
+code(r'''# --backend hf again, and a bounded sample.
+#
+# The generation backend is batch-of-1, so scoring all 3,652 mcq rows for three
+# arms is ~11,000 sequential generations -- hours on a T4, and the reason a
+# full-corpus decision eval is the thing most likely to hit Kaggle's wall clock.
+# N_W2C_EVAL is set well above the point where the per-class rates stabilise:
+# at 1,200 rows the no-tool split still contributes ~770 examples, which is
+# ample for a false-tool-call rate. Widen it if you have the budget.
+N_W2C_EVAL = 1200
+
+for arm, adapter in ARMS:
     args = [sys.executable, '-m', 'src.evaluate_when2call',
             '--data', 'data/raw/w2c_eval.jsonl',
+            '--backend', 'hf',
+            '--limit', N_W2C_EVAL,
             '--checkpoint', BASE, '--out', 'results/' + arm + '_when2call']
     if adapter:
         args += ['--adapter', adapter]
@@ -317,7 +335,27 @@ code(r'''for arm in ['tool_sft', 'reliable_tool_sft']:
                   'compute_dtype', 'device', 'peak_gpu_mem_gb']:
             print('  %-18s %s' % (k, m.get(k)))''')
 
-code(r'''shutil.make_archive('/kaggle/working/reliable_tool_use_results', 'zip', 'results')
+code(r'''# Bundle results AND the trained adapters.
+#
+# results/ alone is not enough: if this kernel dies during evaluation, an
+# archive without outputs/ means the 2.5 GPU-hours of training are gone and the
+# only way back is to re-train. The adapters are ~35 MB each.
+shutil.make_archive('/kaggle/working/reliable_tool_use_results', 'zip', 'results')
+
+adapter_paths = []
+for arm in ['tool_sft', 'reliable_tool_sft']:
+    d = 'outputs/%s' % arm
+    if os.path.isdir(d):
+        for name in os.listdir(d):
+            if name.startswith('adapter_') or name == 'run_config.json':
+                adapter_paths.append(os.path.join(d, name))
+if adapter_paths:
+    with zipfile.ZipFile('/kaggle/working/reliable_tool_use_adapters.zip', 'w',
+                         zipfile.ZIP_DEFLATED) as zf:
+        for p in adapter_paths:
+            zf.write(p, p)
+    print('wrote /kaggle/working/reliable_tool_use_adapters.zip')
+
 print('wrote /kaggle/working/reliable_tool_use_results.zip')
 print(subprocess.run(['du', '-sh', 'results', 'outputs'],
                      capture_output=True, text=True).stdout)''')

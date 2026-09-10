@@ -60,5 +60,6 @@
       "call_precision": 1.0,
       "malformed_blocks": 0
     }
-  }
+  },
+  "backend": "dummy"
 }

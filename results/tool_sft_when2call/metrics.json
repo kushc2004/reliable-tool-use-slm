@@ -40,5 +40,6 @@
       "request_for_info": 0,
       "cannot_answer": 0
     }
-  }
+  },
+  "backend": "dummy"
 }

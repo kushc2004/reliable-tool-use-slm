@@ -42,5 +42,6 @@
       "request_for_info": 0,
       "cannot_answer": 8
     }
-  }
+  },
+  "backend": "dummy"
 }

@@ -25,7 +25,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-__all__ = ["RUNS", "load_json", "build_rows", "write_csv", "make_figures", "main"]
+__all__ = ["RUNS", "load_json", "build_rows", "_assert_real_eval", "write_csv",
+           "make_figures", "main"]
 
 # The three checkpoints, in comparison order.
 RUNS = ["base", "tool_sft", "reliable_tool_sft"]
@@ -76,8 +77,55 @@ def build_rows(results_dir: Path) -> list[dict[str, Any]]:
         row["when2call_cannot_answer_accuracy"] = (decision_metrics or {}).get("cannot_answer_accuracy")
         row["n_tool_eval"] = overall.get("n")
         row["n_when2call"] = (decision_metrics or {}).get("n")
+        # Which backend produced these numbers. Stamped by the evaluators so a
+        # result carries the conditions that produced it.
+        row["backend"] = (tool_metrics or {}).get("backend")
         rows.append(row)
     return rows
+
+
+def _assert_real_eval(rows: list[dict[str, Any]]) -> None:
+    """Refuse to build a comparison table out of the scripted fixture.
+
+    This is the gate that was missing. A full 2.5h training run once produced a
+    table whose every cell was identical across the three arms, because the
+    notebook's eval cells passed --checkpoint and --adapter but never
+    --backend, and both evaluators defaulted to the ``dummy`` fixture. The
+    fixture is *designed* to look perfect on tool-call accuracy and terrible on
+    false-call rate, so the resulting table was plausible and completely fake.
+
+    Two checks, both cheap:
+
+    1. Every arm must report ``backend == "hf"``. A metrics.json without a
+       backend field predates the stamp and cannot be trusted either.
+    2. Three genuinely different checkpoints cannot produce byte-identical
+       predictions. If every arm reports the same exact_match, selection,
+       argument, unseen and When2Call figures, the evaluations did not
+       distinguish between them.
+    """
+    bad = [row["checkpoint"] for row in rows if row.get("backend") != "hf"]
+    if bad:
+        raise SystemExit(
+            "refusing to aggregate: these arms were not evaluated with the real "
+            f"model backend (backend != 'hf'): {bad}. A 'dummy' backend scores "
+            "the scripted fixture, not your adapters. Re-run the evaluators with "
+            "--backend hf."
+        )
+
+    signatures = {
+        (row.get("exact_match"), row.get("tool_selection_accuracy"),
+         row.get("argument_accuracy"), row.get("unseen_function_accuracy"),
+         row.get("when2call_decision_accuracy"),
+         row.get("when2call_false_tool_call_rate"))
+        for row in rows
+    }
+    if len(signatures) == 1 and rows and rows[0].get("exact_match") is not None:
+        raise SystemExit(
+            "refusing to aggregate: all three arms report identical metrics. "
+            "Three different checkpoints cannot score byte-for-byte the same; "
+            "the evaluations did not load the adapters. Check that the eval "
+            "commands passed --backend hf and that the adapter paths exist."
+        )
 
 
 def _pct(value: Any) -> str:
@@ -207,6 +255,12 @@ def render_markdown(rows: list[dict[str, Any]]) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--results", default="results")
+    parser.add_argument(
+        "--allow-fixture",
+        action="store_true",
+        help="permit a dummy-backed run through the comparison gate. Only for "
+             "the offline smoke pipeline; a real result must never use this.",
+    )
     args = parser.parse_args()
 
     results_dir = Path(args.results)
@@ -216,6 +270,12 @@ def main() -> None:
         raise SystemExit(
             f"no tool-call metrics found in {results_dir}; run the evaluators first"
         )
+
+    if args.allow_fixture:
+        print("[warn] --allow-fixture: skipping the real-eval gate. "
+              "These numbers come from a scripted backend, not a model.")
+    else:
+        _assert_real_eval(rows)
 
     write_csv(rows, results_dir / "comparison.csv")
     print(f"[csv] wrote {results_dir / 'comparison.csv'}")

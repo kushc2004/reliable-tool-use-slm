@@ -158,6 +158,7 @@ def run_eval(
     predict: Callable[[dict[str, Any]], str],
     out_dir: Path,
     limit: int | None = None,
+    backend: str | None = None,
 ) -> dict[str, Any]:
     if limit:
         records = records[:limit]
@@ -176,6 +177,12 @@ def run_eval(
             print(f"  generated {index + 1}/{len(records)}")
 
     metrics = compute_metrics(pairs)
+    if backend:
+        # Stamped into metrics.json so a result carries the conditions that
+        # produced it. Without this, "which backend made these numbers" is
+        # unanswerable after the fact -- which is how the fixture results got
+        # as far as a comparison table.
+        metrics["backend"] = backend
     with (out_dir / "predictions.jsonl").open("w", encoding="utf-8") as handle:
         for row in predictions:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
@@ -207,7 +214,12 @@ def main() -> None:
     parser.add_argument("--data", default="data/processed")
     parser.add_argument("--split", default="all",
                         help="all, heldout_tools, unseen_functions or no_tool")
-    parser.add_argument("--backend", choices=BACKENDS, default="dummy")
+    # Defaults to hf, NOT dummy. A bare `--checkpoint ... --out ...` invocation
+    # must not silently score the test fixture: that is exactly how a full
+    # training run once produced three byte-identical "results", because the
+    # notebook passed --checkpoint and --adapter but never --backend. Failing
+    # loudly on a missing torch install is strictly better than faking a table.
+    parser.add_argument("--backend", choices=BACKENDS, default="hf")
     parser.add_argument("--checkpoint", default="Qwen/Qwen2.5-1.5B-Instruct")
     parser.add_argument("--adapter", default=None)
     parser.add_argument("--out", required=True)
@@ -228,7 +240,7 @@ def main() -> None:
     else:
         predict = hf_backend(args.checkpoint, args.adapter, max_new_tokens=args.max_new_tokens)
 
-    run_eval(records, predict, Path(args.out), limit=args.limit)
+    run_eval(records, predict, Path(args.out), limit=args.limit, backend=args.backend)
 
 
 if __name__ == "__main__":

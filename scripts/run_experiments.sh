@@ -202,7 +202,15 @@ done
 # --------------------------------------------------------------------------- #
 echo "-- [6/6] aggregation, error analysis, figures"
 
-"${PY}" -msrc.aggregate_results --results "${RESULTS}"
+# The aggregator refuses to build a comparison table from dummy-backed runs,
+# because that is how a full training run once produced three byte-identical
+# arms. The smoke mode is deliberately fixture-backed, so it opts out
+# explicitly rather than the guard being weakened for everyone.
+AGG_ARGS=()
+if [ "${MODE}" = "smoke" ]; then
+  AGG_ARGS+=(--allow-fixture)
+fi
+"${PY}" -msrc.aggregate_results --results "${RESULTS}" "${AGG_ARGS[@]}"
 "${PY}" -msrc.error_analysis --results "${RESULTS}" \
     --out "${RESULTS}/error_analysis.json" --max-examples 20
 

@@ -92,6 +92,7 @@ def run_eval(
     predict: Any,
     out_dir: Path,
     limit: int | None = None,
+    backend: str | None = None,
 ) -> dict[str, Any]:
     if limit:
         records = records[:limit]
@@ -105,6 +106,8 @@ def run_eval(
 
     scored = score_all(pairs)
     metrics = aggregate_decisions(scored)
+    if backend:
+        metrics["backend"] = backend
 
     with (out_dir / "predictions.jsonl").open("w", encoding="utf-8") as handle:
         for row in scored:
@@ -130,7 +133,11 @@ def run_eval(
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data", default="data/raw/w2c_eval.jsonl")
-    parser.add_argument("--backend", choices=BACKENDS, default="dummy")
+    # See src/evaluate.py: this defaulted to "dummy", which silently scored the
+    # test fixture for all three arms because the notebook never passed
+    # --backend. Default to the real backend so the failure mode is a loud
+    # missing-torch error, not a fabricated comparison table.
+    parser.add_argument("--backend", choices=BACKENDS, default="hf")
     parser.add_argument("--checkpoint", default="Qwen/Qwen2.5-1.5B-Instruct")
     parser.add_argument("--adapter", default=None)
     parser.add_argument("--out", required=True)
@@ -161,7 +168,7 @@ def main() -> None:
             args.checkpoint, args.adapter, max_new_tokens=args.max_new_tokens
         )
 
-    run_eval(records, predict, Path(args.out))
+    run_eval(records, predict, Path(args.out), backend=args.backend)
 
 
 if __name__ == "__main__":
