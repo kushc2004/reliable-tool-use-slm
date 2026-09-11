@@ -213,6 +213,46 @@ print(f'Oracle at {acc:.1%} (floor {ORACLE_FLOOR:.0%}). Scorer is trustworthy.')
 print('NOTE: this is the measurement ceiling for every number below.')''')
 
 
+md(r'''## 6b. Restore cached adapters (optional)
+
+Kaggle wipes `/kaggle/working/` between runs and does not carry `outputs/` forward. So
+without a cache, a single bug anywhere downstream costs the full ~2.5h of QLoRA training
+again -- which is exactly what happened when the evaluators silently scored the test
+fixture.
+
+To use the cache: take the `reliable_tool_use_adapters.zip` this notebook writes at the
+end, upload it as a Kaggle Dataset, and attach that Dataset to the next run. The cell
+below finds it under `/kaggle/input/` (read-only) and unpacks it into `outputs/`; the two
+training cells then skip themselves. With no Dataset attached it is a no-op.''')
+code(r'''import glob
+
+CACHE_HITS = []
+
+# Two shapes are handled: the zip this notebook writes, or an already-unpacked
+# outputs/ tree. /kaggle/input is read-only, so everything is copied into the
+# writable working directory first.
+for zpath in sorted(glob.glob('/kaggle/input/*/reliable_tool_use_adapters.zip')):
+    with zipfile.ZipFile(zpath) as zf:
+        zf.extractall('.')
+    CACHE_HITS.append(zpath)
+
+for dpath in sorted(glob.glob('/kaggle/input/*/outputs')):
+    if not os.path.exists('outputs'):
+        shutil.copytree(dpath, 'outputs')
+        CACHE_HITS.append(dpath)
+
+
+def cached(arm):
+    # adapter_config.json is what PEFT writes alongside adapter_model.safetensors,
+    # so its presence means a usable adapter -- not a half-written directory.
+    return os.path.isfile(os.path.join('outputs', arm, 'adapter_config.json'))
+
+
+for arm in ['tool_sft', 'reliable_tool_sft']:
+    print('%-20s cached=%s' % (arm, cached(arm)))
+print('cache hits:', CACHE_HITS or 'none - will train from scratch')''')
+
+
 md(r'''## 7. Train Tool-SFT
 
 4-bit NF4 QLoRA, rank 16 / alpha 32, 3 epochs. fp16 on T4 -- Turing has no bf16, and the
