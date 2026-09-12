@@ -220,32 +220,63 @@ without a cache, a single bug anywhere downstream costs the full ~2.5h of QLoRA 
 again -- which is exactly what happened when the evaluators silently scored the test
 fixture.
 
-To use the cache: take the `reliable_tool_use_adapters.zip` this notebook writes at the
-end, upload it as a Kaggle Dataset, and attach that Dataset to the next run. The cell
-below finds it under `/kaggle/input/` (read-only) and unpacks it into `outputs/`; the two
-training cells then skip themselves. With no Dataset attached it is a no-op.''')
-code(r'''import glob
+To use the cache: publish the adapters as a Kaggle Dataset with
+`scripts/publish_adapters.sh`, attach that Dataset to this kernel (either through the
+UI or via `dataset_sources` in `kaggle/kernel-metadata.json`), and the cell below copies
+both arms out of `/kaggle/input/` into `outputs/`. The two training cells then skip
+themselves. With no Dataset attached it is a no-op.
+
+The cell finds the arms by searching for `adapter_config.json` rather than by matching a
+fixed path, because the mount layout depends on how the Dataset was uploaded and an
+earlier exact-path version silently matched nothing.''')
+code(r'''import glob, tempfile
 
 CACHE_HITS = []
 
-# Two shapes are handled: the zip this notebook writes, or an already-unpacked
-# outputs/ tree. /kaggle/input is read-only, so everything is copied into the
-# writable working directory first.
-for zpath in sorted(glob.glob('/kaggle/input/*/reliable_tool_use_adapters.zip')):
-    with zipfile.ZipFile(zpath) as zf:
-        zf.extractall('.')
-    CACHE_HITS.append(zpath)
+# Locate the arms by NAME, not by a fixed path.
+#
+# The previous version globbed two exact layouts -- /kaggle/input/*/outputs and
+# the notebook's own reliable_tool_use_adapters.zip. This notebook does not
+# control how the Dataset was uploaded, and the publish script uses
+# `--dir-mode zip`, which stores the contents of outputs/ at the archive root
+# (tool_sft/..., reliable_tool_sft/...). Neither pattern matched that, so the
+# cache was ignored in silence and both arms retrained -- exactly the 2.5 GPU
+# hours the cache exists to save.
+#
+# Searching for adapter_config.json instead is layout-agnostic: whatever shape
+# the mount arrives in, if the arm is there it is found. /kaggle/input is
+# read-only, so matches are copied into the writable working directory.
+SEARCH_ROOTS = ['/kaggle/input']
 
-for dpath in sorted(glob.glob('/kaggle/input/*/outputs')):
-    if not os.path.exists('outputs'):
-        shutil.copytree(dpath, 'outputs')
-        CACHE_HITS.append(dpath)
+# The zip this notebook writes at the end, if that is what was attached.
+for zpath in sorted(glob.glob('/kaggle/input/*/reliable_tool_use_adapters.zip')):
+    tmp = tempfile.mkdtemp()
+    with zipfile.ZipFile(zpath) as zf:
+        zf.extractall(tmp)
+    SEARCH_ROOTS.append(tmp)
+
+for root in SEARCH_ROOTS:
+    for cfg in sorted(glob.glob(os.path.join(root, '**', 'adapter_config.json'),
+                                recursive=True)):
+        arm = os.path.basename(os.path.dirname(cfg))
+        if arm not in ('tool_sft', 'reliable_tool_sft'):
+            continue
+        dst = os.path.join('outputs', arm)
+        if os.path.isdir(dst):
+            continue
+        shutil.copytree(os.path.dirname(cfg), dst)
+        CACHE_HITS.append(os.path.dirname(cfg))
 
 
 def cached(arm):
     # adapter_config.json is what PEFT writes alongside adapter_model.safetensors,
     # so its presence means a usable adapter -- not a half-written directory.
-    return os.path.isfile(os.path.join('outputs', arm, 'adapter_config.json'))
+    # adapter_model.safetensors is checked too: an earlier version looked for
+    # the config alone, and a truncated upload would have passed the check and
+    # then failed inside PeftModel.from_pretrained during evaluation.
+    d = os.path.join('outputs', arm)
+    return (os.path.isfile(os.path.join(d, 'adapter_config.json'))
+            and os.path.isfile(os.path.join(d, 'adapter_model.safetensors')))
 
 
 for arm in ['tool_sft', 'reliable_tool_sft']:
@@ -258,25 +289,41 @@ md(r'''## 7. Train Tool-SFT
 4-bit NF4 QLoRA, rank 16 / alpha 32, 3 epochs. fp16 on T4 -- Turing has no bf16, and the
 trainer gates on compute capability rather than on `is_bf16_supported()`, which returns
 True on hardware that cannot do it.''')
-code(r'''t0 = time.time()
-run(sys.executable, '-m', 'src.train_qlora',
-    '--config', 'configs/tool_sft.yaml',
-    '--data', 'data/processed',
-    '--variant', 'sft',
-    '--out', 'outputs/tool_sft')
-print('Tool-SFT training took %.1f min' % ((time.time() - t0) / 60))''')
+code(r'''# SKIP if the adapter is already present.
+#
+# The cache cell above restores the arms from an attached Kaggle Dataset.
+# Without this guard the cell trained anyway -- the markdown claimed the cells
+# "skip themselves" but no code ever checked, so attaching the cache saved
+# nothing and a re-run still cost the full ~1h of QLoRA.
+if cached('tool_sft'):
+    print('tool_sft adapter already present - skipping training')
+    print(json.load(open('outputs/tool_sft/run_config.json')))
+else:
+    t0 = time.time()
+    run(sys.executable, '-m', 'src.train_qlora',
+        '--config', 'configs/tool_sft.yaml',
+        '--data', 'data/processed',
+        '--variant', 'sft',
+        '--out', 'outputs/tool_sft')
+    print('Tool-SFT training took %.1f min' % ((time.time() - t0) / 60))''')
 
 
 md(r'''## 8. Train Reliable Tool-SFT
 
 Same `--data` as Tool-SFT. The arms differ by `--variant`, not by corpus.''')
-code(r'''t0 = time.time()
-run(sys.executable, '-m', 'src.train_qlora',
-    '--config', 'configs/reliable_tool_sft.yaml',
-    '--data', 'data/processed',
-    '--variant', 'sft-neg',
-    '--out', 'outputs/reliable_tool_sft')
-print('Reliable Tool-SFT training took %.1f min' % ((time.time() - t0) / 60))''')
+code(r'''# Same guard as Tool-SFT. The two arms are cached independently, so a dataset
+# holding only one of them still saves that one.
+if cached('reliable_tool_sft'):
+    print('reliable_tool_sft adapter already present - skipping training')
+    print(json.load(open('outputs/reliable_tool_sft/run_config.json')))
+else:
+    t0 = time.time()
+    run(sys.executable, '-m', 'src.train_qlora',
+        '--config', 'configs/reliable_tool_sft.yaml',
+        '--data', 'data/processed',
+        '--variant', 'sft-neg',
+        '--out', 'outputs/reliable_tool_sft')
+    print('Reliable Tool-SFT training took %.1f min' % ((time.time() - t0) / 60))''')
 
 
 md("## 9. Evaluate - tool-call track")
