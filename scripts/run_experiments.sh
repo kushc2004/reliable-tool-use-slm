@@ -43,7 +43,12 @@ N_EVAL="${N_EVAL:-500}"
 N_W2C_EVAL="${N_W2C_EVAL:-1200}"
 SAMPLE_SEED="${SAMPLE_SEED:-0}"
 # Batched generation. 1 = the old one-row-at-a-time path.
+# W2C_BATCH_SIZE is deliberately independent. The When2Call track's prompts are
+# much longer than the tool-call track's, and --batch-size 8 OOM'd a T4 in the
+# middle of the first When2Call arm (CUDA alloc 8.22 GiB, 14.56 GiB total).
+# 2 is the largest value verified to fit. Bump only on a bigger card.
 BATCH_SIZE="${BATCH_SIZE:-8}"
+W2C_BATCH_SIZE="${W2C_BATCH_SIZE:-2}"
 W2C_MAX_NEW_TOKENS="${W2C_MAX_NEW_TOKENS:-96}"
 
 RESULTS="${ROOT}/results"
@@ -194,16 +199,16 @@ fi
 if [ "${MODE}" = "full" ]; then
   "${PY}" -msrc.evaluate_when2call --data "${W2C_EVAL}" \
       --limit "${N_W2C_EVAL}" --sample-seed "${SAMPLE_SEED}" \
-      --max-new-tokens "${W2C_MAX_NEW_TOKENS}" --batch-size "${BATCH_SIZE}" \
+      --max-new-tokens "${W2C_MAX_NEW_TOKENS}" --batch-size "${W2C_BATCH_SIZE}" \
       --checkpoint "${BASE_MODEL}" --out "${RESULTS}/base_when2call"
   "${PY}" -msrc.evaluate_when2call --data "${W2C_EVAL}" \
       --limit "${N_W2C_EVAL}" --sample-seed "${SAMPLE_SEED}" \
-      --max-new-tokens "${W2C_MAX_NEW_TOKENS}" --batch-size "${BATCH_SIZE}" \
+      --max-new-tokens "${W2C_MAX_NEW_TOKENS}" --batch-size "${W2C_BATCH_SIZE}" \
       --checkpoint "${BASE_MODEL}" --adapter "${OUTPUTS}/tool_sft" \
       --out "${RESULTS}/tool_sft_when2call"
   "${PY}" -msrc.evaluate_when2call --data "${W2C_EVAL}" \
       --limit "${N_W2C_EVAL}" --sample-seed "${SAMPLE_SEED}" \
-      --max-new-tokens "${W2C_MAX_NEW_TOKENS}" --batch-size "${BATCH_SIZE}" \
+      --max-new-tokens "${W2C_MAX_NEW_TOKENS}" --batch-size "${W2C_BATCH_SIZE}" \
       --checkpoint "${BASE_MODEL}" --adapter "${OUTPUTS}/reliable_tool_sft" \
       --out "${RESULTS}/reliable_tool_sft_when2call"
 else

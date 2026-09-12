@@ -21,6 +21,14 @@ from typing import Any
 from .decision_metrics import DECISIONS, aggregate_decisions, format_decision_table, score_all
 from .schema import CALL_CLOSE, CALL_OPEN
 
+#: The When2Call track carries the four-way decision task. Its prompts are much
+#: longer than the tool-call track's (tool definitions + context + utterance),
+#: so a batch size that fits a short-prompt eval (tool-call at 8) blows the
+#: GPU's attention memory. ``1`` is unbatched and always safe; ``2`` is the
+#: largest value that has been verified to fit alongside a loaded quantized
+#: model. Tune up only on a card with more memory than a T4.
+W2C_SAFE_BATCH_SIZE = 2
+
 __all__ = ["load_when2call", "dummy_when2call_backend", "run_eval", "main"]
 
 BACKENDS = ["hf", "dummy", "oracle"]
@@ -234,7 +242,8 @@ def main() -> None:
         "--batch-size",
         type=int,
         default=1,
-        help="generate this many prompts at once; 1 disables batching",
+        help="generate this many prompts at once; 1 disables batching. "
+             "W2C prompts are long, so keep this small (see W2C_SAFE_BATCH_SIZE).",
     )
     parser.add_argument("--failure-rate", type=float, default=0.0)
     parser.add_argument("--seed", type=int, default=0)

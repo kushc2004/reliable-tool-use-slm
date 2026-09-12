@@ -336,7 +336,13 @@ ARMS = [('base', None),
 # turned the three-arm decision eval into 7.4 of the run's 10.8 hours. These are
 # the same values run_experiments.sh has always used; the notebook simply never
 # passed them.
+#
+# Two independent batch sizes. The tool-call track's prompts are short (<=512
+# tokens), so batch 8 fits in the T4's 14.5 GB. The When2Call track's prompts
+# carry tool definitions and context, and --batch-size 8 OOM'd a T4 mid-arm
+# (CUDA alloc 8.22 GiB). It gets its own, much smaller W2C_BATCH_SIZE.
 BATCH_SIZE = 8
+W2C_BATCH_SIZE = 2
 
 # --backend hf IS REQUIRED. Both evaluators default to the "dummy" scripted
 # fixture, which reads the gold answer and degrades it on purpose -- so omitting
@@ -362,6 +368,9 @@ code(r'''# --backend hf again, and a bounded sample.
 # generations. Batching at 8 cuts that by roughly the same factor. The 1200-row
 # limit and the batch size are the same values run_experiments.sh uses.
 #
+# W2C_BATCH_SIZE is NOT BATCH_SIZE. When2Call prompts are long (tool defs +
+# context), and batch 8 OOM'd a T4 mid-arm. 2 is the verified-safe value.
+#
 # N_W2C_EVAL is set well above the point where the per-class rates stabilise:
 # at 1,200 rows the no-tool split still contributes ~770 examples, which is
 # ample for a false-tool-call rate. Widen it if you have the budget.
@@ -372,7 +381,7 @@ for arm, adapter in ARMS:
             '--data', 'data/raw/w2c_eval.jsonl',
             '--backend', 'hf',
             '--limit', N_W2C_EVAL,
-            '--batch-size', BATCH_SIZE,
+            '--batch-size', W2C_BATCH_SIZE,
             '--checkpoint', BASE, '--out', 'results/' + arm + '_when2call']
     if adapter:
         args += ['--adapter', adapter]
