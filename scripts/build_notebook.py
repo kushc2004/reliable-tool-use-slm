@@ -332,6 +332,12 @@ ARMS = [('base', None),
         ('tool_sft', 'outputs/tool_sft'),
         ('reliable_tool_sft', 'outputs/reliable_tool_sft')]
 
+# Batch the generation. Both evaluators default to batch-of-1, and on a T4 that
+# turned the three-arm decision eval into 7.4 of the run's 10.8 hours. These are
+# the same values run_experiments.sh has always used; the notebook simply never
+# passed them.
+BATCH_SIZE = 8
+
 # --backend hf IS REQUIRED. Both evaluators default to the "dummy" scripted
 # fixture, which reads the gold answer and degrades it on purpose -- so omitting
 # this flag produces a table that looks plausible and is entirely fake. An
@@ -340,6 +346,7 @@ ARMS = [('base', None),
 for arm, adapter in ARMS:
     args = [sys.executable, '-m', 'src.evaluate',
             '--data', 'data/processed', '--split', 'all',
+            '--batch-size', BATCH_SIZE,
             '--backend', 'hf',
             '--checkpoint', BASE, '--out', 'results/' + arm]
     if adapter:
@@ -350,9 +357,11 @@ for arm, adapter in ARMS:
 md("## 10. Evaluate - When2Call decision track")
 code(r'''# --backend hf again, and a bounded sample.
 #
-# The generation backend is batch-of-1, so scoring all 3,652 mcq rows for three
-# arms is ~11,000 sequential generations -- hours on a T4, and the reason a
-# full-corpus decision eval is the thing most likely to hit Kaggle's wall clock.
+# --batch-size matters more here than anywhere else. Unbatched, this cell was
+# 7.4 of the run's 10.8 hours: three arms x 1,200 rows as sequential
+# generations. Batching at 8 cuts that by roughly the same factor. The 1200-row
+# limit and the batch size are the same values run_experiments.sh uses.
+#
 # N_W2C_EVAL is set well above the point where the per-class rates stabilise:
 # at 1,200 rows the no-tool split still contributes ~770 examples, which is
 # ample for a false-tool-call rate. Widen it if you have the budget.
@@ -363,6 +372,7 @@ for arm, adapter in ARMS:
             '--data', 'data/raw/w2c_eval.jsonl',
             '--backend', 'hf',
             '--limit', N_W2C_EVAL,
+            '--batch-size', BATCH_SIZE,
             '--checkpoint', BASE, '--out', 'results/' + arm + '_when2call']
     if adapter:
         args += ['--adapter', adapter]
