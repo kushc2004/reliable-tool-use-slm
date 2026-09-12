@@ -102,8 +102,19 @@ def hf_backend(
     adapter: str | None = None,
     max_new_tokens: int = 256,
     temperature: float = 0.0,
+    batch_size: int = 1,
 ) -> Callable[[dict[str, Any]], str]:
-    """Real generation backend: 4-bit base plus optional LoRA adapter."""
+    """Real generation backend: 4-bit base plus optional LoRA adapter.
+
+    ``batch_size > 1`` generates several prompts per forward pass. The returned
+    callable then carries ``.batch`` (list -> list) and ``.batch_size``
+    attributes, which the evaluators pick up when present.
+
+    Batching is the difference between a decision eval that costs 7 hours and
+    one that costs 40 minutes, and it was the single largest term in a 10h47m
+    run. Left padding is mandatory for batched decoder-only generation: with
+    right padding every sequence after the first is conditioned on pad tokens.
+    """
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
@@ -130,9 +141,17 @@ def hf_backend(
         model = PeftModel.from_pretrained(model, adapter)
     model.eval()
 
-    def predict(record: dict[str, Any]) -> str:
-        prompt = render_conversation(record, add_generation_prompt=True)
-        inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+    eos_id = tokenizer.convert_tokens_to_ids(IM_END)
+    prev_side = tokenizer.padding_side
+
+    def batch_predict(records: list[dict[str, Any]]) -> list[str]:
+        prompts = [render_conversation(r, add_generation_prompt=True) for r in records]
+        tokenizer.padding_side = "left"
+        try:
+            inputs = tokenizer(prompts, return_tensors="pt", padding=True)
+        finally:
+            tokenizer.padding_side = prev_side
+        inputs = inputs.to(model.device)
         with torch.no_grad():
             output = model.generate(
                 **inputs,
@@ -140,11 +159,17 @@ def hf_backend(
                 do_sample=temperature > 0,
                 temperature=temperature or None,
                 pad_token_id=tokenizer.pad_token_id,
-                eos_token_id=tokenizer.convert_tokens_to_ids(IM_END),
+                eos_token_id=eos_id,
             )
-        generated = output[0][inputs["input_ids"].shape[1]:]
-        return tokenizer.decode(generated, skip_special_tokens=False).split(IM_END)[0]
+        generated = output[:, inputs["input_ids"].shape[1]:]
+        decoded = tokenizer.batch_decode(generated, skip_special_tokens=False)
+        return [text.split(IM_END)[0] for text in decoded]
 
+    def predict(record: dict[str, Any]) -> str:
+        return batch_predict([record])[0]
+
+    predict.batch = batch_predict  # type: ignore[attr-defined]
+    predict.batch_size = max(1, batch_size)  # type: ignore[attr-defined]
     return predict
 
 
@@ -167,14 +192,31 @@ def run_eval(
 
     pairs: list[tuple[dict[str, Any], str]] = []
     predictions: list[dict[str, Any]] = []
-    for index, record in enumerate(records):
-        prediction = predict(record)
-        pairs.append((record, prediction))
-        predictions.append(
-            {"id": record.get("id"), "split": record.get("split"), "prediction": prediction}
-        )
-        if (index + 1) % 100 == 0:
-            print(f"  generated {index + 1}/{len(records)}")
+    batch_fn = getattr(predict, "batch", None)
+    batch_size = getattr(predict, "batch_size", 1) or 1
+    if batch_fn is not None and batch_size > 1:
+        for start in range(0, len(records), batch_size):
+            chunk = records[start : start + batch_size]
+            for record, prediction in zip(chunk, batch_fn(chunk)):
+                pairs.append((record, prediction))
+                predictions.append(
+                    {
+                        "id": record.get("id"),
+                        "split": record.get("split"),
+                        "prediction": prediction,
+                    }
+                )
+            if min(start + batch_size, len(records)) % 100 < batch_size:
+                print(f"  generated {min(start + batch_size, len(records))}/{len(records)}")
+    else:
+        for index, record in enumerate(records):
+            prediction = predict(record)
+            pairs.append((record, prediction))
+            predictions.append(
+                {"id": record.get("id"), "split": record.get("split"), "prediction": prediction}
+            )
+            if (index + 1) % 100 == 0:
+                print(f"  generated {index + 1}/{len(records)}")
 
     metrics = compute_metrics(pairs)
     if backend:
@@ -225,6 +267,8 @@ def main() -> None:
     parser.add_argument("--out", required=True)
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--max-new-tokens", type=int, default=256)
+    parser.add_argument("--batch-size", type=int, default=1,
+                        help="generate this many prompts at once; 1 disables batching")
     parser.add_argument("--failure-rate", type=float, default=0.0,
                         help="dummy backend only: how often to degrade a prediction")
     parser.add_argument("--seed", type=int, default=0)
@@ -238,7 +282,12 @@ def main() -> None:
     if args.backend == "dummy":
         predict = dummy_backend(failure_rate=args.failure_rate, seed=args.seed)
     else:
-        predict = hf_backend(args.checkpoint, args.adapter, max_new_tokens=args.max_new_tokens)
+        predict = hf_backend(
+            args.checkpoint,
+            args.adapter,
+            max_new_tokens=args.max_new_tokens,
+            batch_size=args.batch_size,
+        )
 
     run_eval(records, predict, Path(args.out), limit=args.limit, backend=args.backend)
 

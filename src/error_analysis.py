@@ -5,6 +5,7 @@ and assigns each failure exactly one category, so the counts add up:
 
     wrong_tool              called a function, but not the right one
     malformed_json          emitted a call block that would not parse
+    no_call_emitted         answered in prose when a call was required
     wrong_argument_value    right function, one or more values wrong
     missing_argument        right function, a required argument omitted
     hallucinated_argument   right function, invented an argument value

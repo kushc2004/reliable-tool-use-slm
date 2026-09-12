@@ -37,6 +37,14 @@ SEED="${SEED:-0}"
 N_TRAIN="${N_TRAIN:-3000}"
 N_W2C_TRAIN="${N_W2C_TRAIN:-1000}"
 N_EVAL="${N_EVAL:-500}"
+# Decision-track sample size and the seed its stratified sample is drawn with.
+# The oracle and the three arms MUST use the same seed: they are compared on
+# the same rows, and a sanity check run on different rows validates nothing.
+N_W2C_EVAL="${N_W2C_EVAL:-1200}"
+SAMPLE_SEED="${SAMPLE_SEED:-0}"
+# Batched generation. 1 = the old one-row-at-a-time path.
+BATCH_SIZE="${BATCH_SIZE:-8}"
+W2C_MAX_NEW_TOKENS="${W2C_MAX_NEW_TOKENS:-96}"
 
 RESULTS="${ROOT}/results"
 DATA="${ROOT}/data"
@@ -137,11 +145,14 @@ echo "-- [4/6] tool-call evaluation"
 
 if [ "${MODE}" = "full" ]; then
   "${PY}" -msrc.evaluate --data "${DATA}/processed" --split all \
+      --batch-size "${BATCH_SIZE}" \
       --checkpoint "${BASE_MODEL}" --out "${RESULTS}/base"
   "${PY}" -msrc.evaluate --data "${DATA}/processed" --split all \
+      --batch-size "${BATCH_SIZE}" \
       --checkpoint "${BASE_MODEL}" --adapter "${OUTPUTS}/tool_sft" \
       --out "${RESULTS}/tool_sft"
   "${PY}" -msrc.evaluate --data "${DATA}/processed" --split all \
+      --batch-size "${BATCH_SIZE}" \
       --checkpoint "${BASE_MODEL}" --adapter "${OUTPUTS}/reliable_tool_sft" \
       --out "${RESULTS}/reliable_tool_sft"
 else
@@ -171,24 +182,39 @@ else
 fi
 
 # Sanity check the scorer against a perfect backend before trusting any model.
+#
+# --limit and --sample-seed are passed HERE TOO. The previous version ran the
+# oracle on the full file while the arms ran on the first 1200 rows, so a
+# passing oracle proved nothing about the rows actually being scored -- and
+# those rows were all one label.
 "${PY}" -msrc.evaluate_when2call --data "${W2C_EVAL}" \
-    --backend oracle --out "${RESULTS}/oracle_when2call"
+    --backend oracle --limit "${N_W2C_EVAL}" --sample-seed "${SAMPLE_SEED}" \
+    --out "${RESULTS}/oracle_when2call"
 
 if [ "${MODE}" = "full" ]; then
   "${PY}" -msrc.evaluate_when2call --data "${W2C_EVAL}" \
+      --limit "${N_W2C_EVAL}" --sample-seed "${SAMPLE_SEED}" \
+      --max-new-tokens "${W2C_MAX_NEW_TOKENS}" --batch-size "${BATCH_SIZE}" \
       --checkpoint "${BASE_MODEL}" --out "${RESULTS}/base_when2call"
   "${PY}" -msrc.evaluate_when2call --data "${W2C_EVAL}" \
+      --limit "${N_W2C_EVAL}" --sample-seed "${SAMPLE_SEED}" \
+      --max-new-tokens "${W2C_MAX_NEW_TOKENS}" --batch-size "${BATCH_SIZE}" \
       --checkpoint "${BASE_MODEL}" --adapter "${OUTPUTS}/tool_sft" \
       --out "${RESULTS}/tool_sft_when2call"
   "${PY}" -msrc.evaluate_when2call --data "${W2C_EVAL}" \
+      --limit "${N_W2C_EVAL}" --sample-seed "${SAMPLE_SEED}" \
+      --max-new-tokens "${W2C_MAX_NEW_TOKENS}" --batch-size "${BATCH_SIZE}" \
       --checkpoint "${BASE_MODEL}" --adapter "${OUTPUTS}/reliable_tool_sft" \
       --out "${RESULTS}/reliable_tool_sft_when2call"
 else
   "${PY}" -msrc.evaluate_when2call --data "${W2C_EVAL}" \
+      --limit "${N_W2C_EVAL}" --sample-seed "${SAMPLE_SEED}" \
       --backend dummy --failure-rate 0.75 --out "${RESULTS}/base_when2call"
   "${PY}" -msrc.evaluate_when2call --data "${W2C_EVAL}" \
+      --limit "${N_W2C_EVAL}" --sample-seed "${SAMPLE_SEED}" \
       --backend dummy --failure-rate 0.0 --out "${RESULTS}/tool_sft_when2call"
   "${PY}" -msrc.evaluate_when2call --data "${W2C_EVAL}" \
+      --limit "${N_W2C_EVAL}" --sample-seed "${SAMPLE_SEED}" \
       --backend dummy --failure-rate 0.25 --out "${RESULTS}/reliable_tool_sft_when2call"
 fi
 
@@ -213,6 +239,7 @@ fi
 "${PY}" -msrc.aggregate_results --results "${RESULTS}" "${AGG_ARGS[@]}"
 "${PY}" -msrc.error_analysis --results "${RESULTS}" \
     --out "${RESULTS}/error_analysis.json" --max-examples 20
+"${PY}" -msrc.cv_metrics --results "${RESULTS}" --out "${RESULTS}/cv_metrics.md"
 
 echo
 echo "== done =="

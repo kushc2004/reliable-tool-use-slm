@@ -27,6 +27,14 @@ __pycache__/
 # commit rather than any content. Re-fetch it when needed.
 /kaggle/output/
 
+# Same reasoning, plus ~280 MB of zips: the Kaggle output download. Adapters in
+# here are published as a Kaggle Dataset by scripts/publish_adapters.sh, not
+# committed to git.
+/kaggle-outputs/
+
+# Staging directory used by scripts/publish_adapters.sh
+/.kaggle-adapters-stage/
+
 # Local
 .venv/
 venv/

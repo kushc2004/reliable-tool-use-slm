@@ -25,15 +25,83 @@ __all__ = ["load_when2call", "dummy_when2call_backend", "run_eval", "main"]
 
 BACKENDS = ["hf", "dummy", "oracle"]
 
+# ``direct`` is deliberately NOT required: the real ``mcq`` split carries all
+# four answer strings but no row is gold-``direct`` (see prepare_when2call).
+# The other three must be present or the "four-way" score is not four-way.
+REQUIRED_DECISIONS = ["tool_call", "request_for_info", "cannot_answer"]
 
-def load_when2call(path: str | Path, limit: int | None = None) -> list[dict[str, Any]]:
+
+def stratified_sample(
+    records: list[dict[str, Any]], limit: int, seed: int = 0
+) -> list[dict[str, Any]]:
+    """Take a label-stratified sample of at most ``limit`` records.
+
+    ``records[:limit]`` is the wrong operation here and it is not a subtle one.
+    The real ``mcq`` split is *grouped by gold label* -- 1295 ``cannot_answer``,
+    then 1062 ``request_for_info``, then 1295 ``tool_call`` -- so a 1200-row head
+    is 1200 ``cannot_answer`` rows and nothing else. That silently collapsed the
+    four-way decision track to one-class accuracy, and because the oracle ran
+    without a limit it still passed and nobody noticed.
+
+    Proportional per-class allocation, with one row guaranteed per class,
+    keeps every class in the slice. Fixed seed, so the oracle and the arms
+    sample the same rows.
+    """
+    import random
+
+    if limit >= len(records):
+        return list(records)
+
+    rng = random.Random(seed)
+    by_decision: dict[Any, list[dict[str, Any]]] = {}
+    for record in records:
+        by_decision.setdefault(record.get("decision"), []).append(record)
+    for bucket in by_decision.values():
+        rng.shuffle(bucket)
+
+    # ``limit`` smaller than the number of classes: one row from each of the
+    # first ``limit`` classes rather than an empty result.
+    if limit < len(by_decision):
+        picked = [by_decision[label][0] for label in sorted(by_decision)[:limit]]
+        rng.shuffle(picked)
+        return picked
+
+    total = len(records)
+    quota = {label: 1 for label in by_decision}
+    remaining = limit - len(quota)
+    for label in sorted(by_decision):
+        quota[label] += int(remaining * len(by_decision[label]) / total)
+
+    # Hand out the rounding remainder to the classes with the most unsampled
+    # rows; trim it back from the largest quota if we overshot.
+    while sum(quota.values()) < limit:
+        label = max(by_decision, key=lambda k: len(by_decision[k]) - quota[k])
+        quota[label] += 1
+    while sum(quota.values()) > limit:
+        label = max(quota, key=lambda k: quota[k])
+        if quota[label] <= 1:
+            break
+        quota[label] -= 1
+
+    picked = []
+    for label in sorted(by_decision):
+        picked.extend(by_decision[label][: quota[label]])
+    rng.shuffle(picked)
+    return picked
+
+
+def load_when2call(
+    path: str | Path, limit: int | None = None, seed: int = 0
+) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     with Path(path).open("r", encoding="utf-8") as handle:
         for line in handle:
             line = line.strip()
             if line:
                 records.append(json.loads(line))
-    return records[:limit] if limit else records
+    if limit:
+        records = stratified_sample(records, limit, seed=seed)
+    return records
 
 
 def _render_calls(calls: list[dict[str, Any]]) -> str:
@@ -99,10 +167,21 @@ def run_eval(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     pairs: list[tuple[dict[str, Any], str]] = []
-    for index, record in enumerate(records):
-        pairs.append((record, predict(record)))
-        if (index + 1) % 50 == 0:
-            print(f"  generated {index + 1}/{len(records)}")
+    batch_fn = getattr(predict, "batch", None)
+    batch_size = getattr(predict, "batch_size", 1) or 1
+    if batch_fn is not None and batch_size > 1:
+        for start in range(0, len(records), batch_size):
+            chunk = records[start : start + batch_size]
+            for record, prediction in zip(chunk, batch_fn(chunk)):
+                pairs.append((record, prediction))
+            done = min(start + batch_size, len(records))
+            if done // 50 > start // 50:
+                print(f"  generated {done}/{len(records)}")
+    else:
+        for index, record in enumerate(records):
+            pairs.append((record, predict(record)))
+            if (index + 1) % 50 == 0:
+                print(f"  generated {index + 1}/{len(records)}")
 
     scored = score_all(pairs)
     metrics = aggregate_decisions(scored)
@@ -142,20 +221,51 @@ def main() -> None:
     parser.add_argument("--adapter", default=None)
     parser.add_argument("--out", required=True)
     parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument(
+        "--sample-seed",
+        type=int,
+        default=0,
+        help="seed for stratified --limit sampling. The oracle and the arms must "
+             "use the same value, or the sanity check validates different rows "
+             "than the ones the models are scored on.",
+    )
     parser.add_argument("--max-new-tokens", type=int, default=256)
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=1,
+        help="generate this many prompts at once; 1 disables batching",
+    )
     parser.add_argument("--failure-rate", type=float, default=0.0)
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
 
-    records = load_when2call(args.data, limit=args.limit)
+    records = load_when2call(args.data, limit=args.limit, seed=args.sample_seed)
     print(f"loaded {len(records)} When2Call records from {args.data}")
+    if args.limit:
+        print(
+            f"[sample] stratified {len(records)} of the full split "
+            f"(limit={args.limit}, seed={args.sample_seed})"
+        )
     if not records:
         raise SystemExit("no records; run src.data.prepare_when2call first")
 
+    # This used to be a ``print``. It fired on every arm run -- because a
+    # 1200-row head of the label-sorted file is 1200 ``cannot_answer`` rows --
+    # and scrolled past into a results table whose "four-way" decision_accuracy
+    # was one-class accuracy. A missing required class is a broken experiment,
+    # not a warning.
     present = {record.get("decision") for record in records}
-    missing = [label for label in DECISIONS if label not in present]
-    if missing:
-        print(f"[warn] categories absent from this split: {missing}")
+    missing_required = [label for label in REQUIRED_DECISIONS if label not in present]
+    if missing_required:
+        raise SystemExit(
+            f"decision split is missing required classes {missing_required} "
+            f"(present: {sorted(present)}). A four-way score cannot be computed "
+            "from this slice; check --limit / --sample-seed and the data file."
+        )
+    optional_missing = [label for label in DECISIONS if label not in present]
+    if optional_missing:
+        print(f"[warn] categories absent from this split (optional): {optional_missing}")
 
     if args.backend == "oracle":
         predict = oracle_backend()
@@ -165,7 +275,10 @@ def main() -> None:
         from .evaluate import hf_backend
 
         predict = hf_backend(
-            args.checkpoint, args.adapter, max_new_tokens=args.max_new_tokens
+            args.checkpoint,
+            args.adapter,
+            max_new_tokens=args.max_new_tokens,
+            batch_size=args.batch_size,
         )
 
     run_eval(records, predict, Path(args.out), backend=args.backend)
