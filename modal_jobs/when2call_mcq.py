@@ -20,7 +20,6 @@ Results are persisted in the ``reliable-tool-use-slm-eval`` Modal Volume under
 
 from __future__ import annotations
 
-import ast
 import importlib.util
 import json
 import os
@@ -85,6 +84,54 @@ common_env = {
 }
 
 
+# NVIDIA's published task uses a ``macro_f1`` metric that older LM-Eval
+# versions exposed. Current LM-Eval still has the same multiple-choice scoring
+# primitives, but no longer registers that metric name. Keep the official task
+# contract intact by restoring exactly the missing passthrough + aggregation and
+# by emitting the same (gold_index, predicted_index) pair that NVIDIA's
+# ``additional_metrics.py`` expects in every logged sample.
+MACRO_F1_COMPAT = r'''from __future__ import annotations
+
+import numpy as np
+from sklearn.metrics import f1_score
+
+from lm_eval.api.registry import register_aggregation, register_metric
+
+
+@register_aggregation("macro_f1")
+def macro_f1_aggregate(items):
+    golds, preds = zip(*items, strict=True)
+    return float(f1_score(golds, preds, average="macro"))
+
+
+@register_metric(
+    metric="macro_f1",
+    higher_is_better=True,
+    output_type="multiple_choice",
+    aggregation="macro_f1",
+)
+def macro_f1(items):
+    return items
+
+
+def process_results(doc, results):
+    """Current LM-Eval multiple-choice scoring + NVIDIA's macro_f1 pair."""
+    lls, _is_greedy = zip(*results, strict=True)
+    choices = doc["choices"]
+    completion_len = np.array([float(len(choice)) for choice in choices])
+
+    pred = int(np.argmax(lls))
+    pred_norm = int(np.argmax(np.asarray(lls) / completion_len))
+    gold = int(doc["target_index"])
+
+    return {
+        "macro_f1": (gold, pred),
+        "acc": 1.0 if pred == gold else 0.0,
+        "acc_norm": 1.0 if pred_norm == gold else 0.0,
+    }
+'''
+
+
 def _adapter_path(name: str) -> Path:
     """Resolve an adapter directory and fail loudly if the Kaggle layout moved."""
     expected = ADAPTER_ROOT / "outputs" / name
@@ -147,7 +194,15 @@ def _prepare_official_task() -> Path:
         "data_files: lm_eval/tasks/when2call/when2call_test_mcq.jsonl",
         f"data_files: {dataset}",
     )
+    # See MACRO_F1_COMPAT above. Referencing the function from YAML imports the
+    # module while the task config is loaded, which also runs its metric
+    # registration decorators before LM-Eval validates ``metric_list``.
+    text = text.replace(
+        "output_type: multiple_choice\n",
+        "output_type: multiple_choice\nprocess_results: !function compat.process_results\n",
+    )
     qwen_yaml.write_text(text, encoding="utf-8")
+    (task_dir / "compat.py").write_text(MACRO_F1_COMPAT, encoding="utf-8")
     return task_dir
 
 
