@@ -4,6 +4,11 @@
 
 | Metric | Value |
 |---|---:|
+| Official When2Call normalized accuracy | 71.03% |
+| Official When2Call macro F1 | 52.01% |
+| Official hallucination rate | 8.14% |
+| Official hallucination reduction (Tool-SFT → Reliable) | 32.56% |
+| Official relative hallucination reduction | 80.0% |
 | Base exact tool-call accuracy | 0.0% |
 | Reliable Tool-SFT exact tool-call accuracy | 86.1% |
 | Absolute improvement | 86.1% |
@@ -15,7 +20,18 @@
 | Relative false tool-call reduction | 87.5% |
 | Decision-accuracy gain (Tool-SFT → Reliable) | 24.8% |
 
-## Full comparison
+## Official When2Call MCQ (3,652 examples)
+
+| Metric | Base | Tool-SFT | Reliable Tool-SFT |
+|---|---:|---:|---:|
+| Accuracy | 47.21% | 43.81% | 69.17% |
+| Length-normalized accuracy | 52.79% | 49.81% | 71.03% |
+| Macro F1 | 30.63% | 26.26% | 52.01% |
+| Hallucination rate | 24.42% | 40.70% | 8.14% |
+| Tool-call precision | 49.36% | 46.37% | 68.29% |
+| Tool-call recall | 94.83% | 95.29% | 79.00% |
+
+## Generation-based comparison
 
 | Metric | Base | Tool-SFT | Reliable Tool-SFT |
 |---|---:|---:|---:|

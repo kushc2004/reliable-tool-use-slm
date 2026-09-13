@@ -24,7 +24,8 @@ Training is 4-bit NF4 QLoRA (rank 16, alpha 32, LR 2e-4, 3 epochs, max seq len 5
 
 ## Evaluation
 
-Two independent tracks, both scored from raw generations:
+Three complementary evaluations are reported. The first two use raw generations;
+the third is the standardized NVIDIA When2Call multiple-choice benchmark.
 
 **Tool-call track** — JSON validity, function-name accuracy, argument accuracy, exact call-set match, and held-out-function exact match (whole function *names* excluded from training, so this measures schema generalisation rather than phrasing memorisation).
 
@@ -34,6 +35,12 @@ Two independent tracks, both scored from raw generations:
 - **missing-info accuracy** — on under-specified prompts, did it ask rather than invent an argument
 - **cannot-answer accuracy** — did it decline rather than call the nearest available function
 
+**Official When2Call MCQ** — all 3,652 examples from NVIDIA's published
+`when2call-qwen2_5` LM-Eval task, reporting raw accuracy, length-normalized
+accuracy, macro-F1, the benchmark-defined hallucination rate, and the answer
+category confusion matrix. This evaluation does not depend on the project's
+free-form cue classifier.
+
 Two caveats on this track, both measured against the real dataset rather than assumed:
 
 - The `mcq` test split carries all four answer strings on every row, but **no row is gold-`direct`** — the label distribution is `tool_call` 35.5%, `cannot_answer` 35.5%, `request_for_info` 29.1%. `direct` accuracy is therefore **not measurable on the real benchmark**; the scorer still reports it, and it is meaningful only on the synthetic fixture.
@@ -41,7 +48,28 @@ Two caveats on this track, both measured against the real dataset rather than as
 
 ## Results
 
-The full GPU experiment has now been evaluated with the real Hugging Face model backend on a Kaggle Tesla T4. The committed files under `results/` are the real model results; `results/comparison.md` and `results/comparison.csv` are regenerated directly from the raw metric JSON files.
+The strongest decision result is the full official When2Call MCQ evaluation.
+It was run on a Modal L40S using the already-trained public Kaggle adapters;
+**no retraining was performed**. All three checkpoints see the same 3,652
+benchmark examples.
+
+| Official When2Call MCQ metric | Base | Tool-SFT | Reliable Tool-SFT |
+|---|---:|---:|---:|
+| Accuracy | 47.21% | 43.81% | **69.17%** |
+| Length-normalized accuracy | 52.79% | 49.81% | **71.03%** |
+| Macro F1 | 30.63% | 26.26% | **52.01%** |
+| Hallucination rate ↓ | 24.42% | 40.70% | **8.14%** |
+
+Relative to positive-only Tool-SFT, Reliable Tool-SFT improves normalized
+accuracy by **21.22 percentage points**, improves macro-F1 by **25.75 points**,
+and reduces the official hallucination rate by **32.56 points (80.0% relative)**.
+From the official confusion matrix it still recalls **79.0%** of gold tool-call
+cases (1023/1295), so the standardized evaluation shows a substantially better
+reliability/recall balance than the earlier free-form diagnostic.
+
+The original generation-based evaluation remains useful because it tests actual
+emitted JSON/function calls rather than MCQ choice likelihoods. Those real-model
+results were run with the Hugging Face backend on a Kaggle Tesla T4:
 
 | Metric | Base | Tool-SFT | Reliable Tool-SFT |
 |---|---:|---:|---:|
@@ -69,9 +97,20 @@ Additional decision metrics expose the reliability/recall trade-off:
 
 ## Key finding
 
-Positive-only function-calling SFT teaches the model **how to call tools** but makes it call far too often: Tool-SFT reaches 94.6% exact call match while falsely calling a tool on 89.9% of non-tool When2Call cases. Adding ~1K clarification/refusal/no-tool examples cuts that false-call rate to **11.2%** (−78.7 percentage points, **87.5% relative reduction**) and raises When2Call decision accuracy from **37.3% to 62.1%**.
+Positive-only function-calling SFT teaches the model **how to call tools** but
+does not teach it reliably **when** to call them. On the full official When2Call
+MCQ benchmark, Tool-SFT is actually worse than Base on macro-F1 (26.26% vs
+30.63%) and has a 40.70% hallucination rate. Adding ~1K
+clarification/refusal/no-tool examples raises macro-F1 to **52.01%**, normalized
+accuracy to **71.03%**, and cuts hallucination to **8.14%**.
 
-That reliability gain is not free. Reliable Tool-SFT falls from 94.6% to 86.1% exact call match, from 96.4% to 78.3% held-out-function EM, and from 97.2% to 48.2% tool-call recall. The result is therefore a calibrated trade-off rather than a uniformly better checkpoint: negative supervision sharply reduces action hallucination and improves abstention/clarification behaviour, but makes the model more conservative when a call is actually warranted.
+The generation-based track independently shows the same mechanism from another
+angle: Tool-SFT reaches 94.6% exact call match but over-calls heavily, while
+Reliable Tool-SFT reduces the free-form false-tool-call rate from 89.9% to
+11.2%. The reliability gain is not free — exact call match falls from 94.6% to
+86.1% and unseen-function EM from 96.4% to 78.3% — but the official benchmark
+shows that call recall remains **79.0%** under standardized scoring rather than
+collapsing completely.
 
 The evaluated adapters use Qwen2.5-1.5B-Instruct with 4-bit QLoRA. The run metadata records 18,464,768 trainable parameters (2.036% of 907,081,216) and 4.86 GB peak GPU memory on a Tesla T4. The final evaluation run restored already-trained adapters, so the original training wall-clock duration is not reconstructed from this log.
 
@@ -146,6 +185,11 @@ are kept separate from the project's free-form 1,200-example decision track;
 the latter measures generated behavior, while the MCQ benchmark provides the
 standardized published comparison.
 
+Completed full-run results are tracked under
+`results/official_when2call_mcq/`. Provenance for the published run records an
+NVIDIA L40S, BF16 + SDPA, all 3,652 examples, the exact When2Call and LM-Eval
+commits, Kaggle adapter dataset version 2, and `training_performed: false`.
+
 The scorer is verified against a perfect oracle before any model is trusted — a step that caught a real classifier bug during development (see below).
 
 ```bash
@@ -180,8 +224,8 @@ During development the oracle sanity check scored 93.75% instead of 100%, which 
 ## Limitations
 
 - The committed model metrics come from a real GPU evaluation. `MODE=smoke` still exists only as an offline pipeline fixture and must never be interpreted as model performance.
-- The When2Call numbers reported above use a deterministic 1,200-example stratified subset rather than the full 3,652-row `mcq` split. A full official benchmark evaluation is the highest-value remaining validation step.
-- `direct` / `request_for_info` / `cannot_answer` are inferred from free-form model prose by an auditable cue-based classifier. On the full 3,652-row split, an oracle that emits the gold answer text scores 99.3% decision accuracy, so the heuristic imposes a small measured ceiling on absolute scores. A standardized multiple-choice evaluator would remove this dependency.
+- The free-form When2Call diagnostic still uses a deterministic 1,200-example stratified subset and an auditable cue-based prose classifier. Its gold-answer oracle reaches 99.3%, so those diagnostic absolute scores retain a small measured classifier ceiling. The primary standardized decision result now comes from the full 3,652-example official MCQ evaluation and does not use that classifier.
+- The official MCQ hallucination rate is NVIDIA's benchmark-defined metric (tool calls on a particular `cannot_answer`/no-tool subset). It is not numerically interchangeable with this project's broader free-form false-tool-call rate.
 - The two arms differ in record count (3000 vs 4000) as well as in content, because the added negatives *are* the treatment. Both run the same 3 epochs, so gradient-step count differs slightly — that is part of the intervention, not a controlled quantity.
 - `direct` accuracy is not measurable on the real When2Call test split (no gold-`direct` rows), and the training negatives are capped at 10 `direct` rows by the benchmark itself. See the Evaluation section.
 - Results are from one QLoRA configuration/seed. The project deliberately avoids a large hyperparameter sweep, but the reported deltas do not include multi-seed confidence intervals.

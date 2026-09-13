@@ -15,7 +15,14 @@
       "when2call_missing_info_accuracy": 0.66189111747851,
       "when2call_cannot_answer_accuracy": 0.11267605633802817,
       "n_tool_eval": 249,
-      "n_when2call": 1200
+      "n_when2call": 1200,
+      "official_when2call_n": 3652,
+      "official_when2call_accuracy": 0.4720700985761227,
+      "official_when2call_accuracy_norm": 0.5279299014238773,
+      "official_when2call_macro_f1": 0.3063392216685031,
+      "official_when2call_hallucination_rate": 0.2441860465116279,
+      "official_tool_call_recall": 0.9482625482625483,
+      "official_tool_call_precision": 0.49356913183279744
     },
     "tool_sft": {
       "exact_match": 0.9457831325301205,
@@ -32,7 +39,14 @@
       "when2call_missing_info_accuracy": 0.10028653295128939,
       "when2call_cannot_answer_accuracy": 0.0,
       "n_tool_eval": 249,
-      "n_when2call": 1200
+      "n_when2call": 1200,
+      "official_when2call_n": 3652,
+      "official_when2call_accuracy": 0.43811610076670315,
+      "official_when2call_accuracy_norm": 0.49808324205914567,
+      "official_when2call_macro_f1": 0.2625785895490299,
+      "official_when2call_hallucination_rate": 0.4069767441860465,
+      "official_tool_call_recall": 0.9528957528957529,
+      "official_tool_call_precision": 0.4637354378053363
     },
     "reliable_tool_sft": {
       "exact_match": 0.8614457831325302,
@@ -49,7 +63,14 @@
       "when2call_missing_info_accuracy": 0.7335243553008596,
       "when2call_cannot_answer_accuracy": 0.6666666666666666,
       "n_tool_eval": 249,
-      "n_when2call": 1200
+      "n_when2call": 1200,
+      "official_when2call_n": 3652,
+      "official_when2call_accuracy": 0.6916757940854327,
+      "official_when2call_accuracy_norm": 0.7102957283680176,
+      "official_when2call_macro_f1": 0.5201242382437845,
+      "official_when2call_hallucination_rate": 0.08139534883720931,
+      "official_tool_call_recall": 0.78996138996139,
+      "official_tool_call_precision": 0.6829105473965287
     }
   },
   "headline": {
@@ -60,7 +81,11 @@
     "tool_to_reliable_false_call_drop_rel": 0.8751793400286944,
     "tool_to_reliable_decision_accuracy_gain_abs": 0.2475,
     "tool_to_reliable_missing_info_gain_abs": 0.6332378223495702,
-    "tool_to_reliable_cannot_answer_gain_abs": 0.6666666666666666
+    "tool_to_reliable_cannot_answer_gain_abs": 0.6666666666666666,
+    "official_tool_to_reliable_accuracy_norm_gain_abs": 0.2122124863088719,
+    "official_tool_to_reliable_macro_f1_gain_abs": 0.2575456486947546,
+    "official_tool_to_reliable_hallucination_drop_abs": 0.32558139534883723,
+    "official_tool_to_reliable_hallucination_drop_rel": 0.8
   },
   "data": {
     "sources": [

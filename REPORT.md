@@ -42,6 +42,12 @@ The negatives are **not** class-balanced, and cannot be: When2Call contributes 4
 
 **Decision track** (`src/decision_metrics.py`): decision accuracy, macro F1, tool-call precision and recall, false tool-call rate, missing-info accuracy, cannot-answer accuracy, and a 4×4 confusion matrix.
 
+**Official When2Call MCQ validation**: NVIDIA's complete 3,652-example
+`when2call-qwen2_5` LM-Eval task, reporting raw accuracy, length-normalized
+accuracy, macro-F1, the benchmark-defined hallucination rate, and the answer
+category confusion matrix. Unlike the free-form diagnostic, this path scores
+choice likelihoods and does not use the project's cue classifier.
+
 One caveat, measured rather than assumed: the `mcq` test split carries all four answer strings on every row but **no row is gold-`direct`** (`tool_call` 35.5%, `cannot_answer` 35.5%, `request_for_info` 29.1%). `direct` accuracy is therefore not measurable on the real benchmark; the metric is reported but is only meaningful on the synthetic fixture. The matrix keeps four columns regardless, because a model can wrongly *predict* `direct`.
 
 ## Verification
@@ -71,7 +77,28 @@ Two guards cover the same class of failure: `build_dataset` refuses to write an 
 
 ## Final model results
 
-The real GPU experiment has completed. The evaluated checkpoints use the Hugging Face backend rather than the scripted smoke fixture, and the real metrics are now promoted into the committed `results/` directory.
+The real GPU experiments have completed. The primary standardized decision
+result is the full official When2Call MCQ benchmark, evaluated on Modal with an
+L40S using the public Kaggle adapters. The Modal run is evaluation-only and
+records `training_performed: false`.
+
+| Official When2Call MCQ metric | Base | Tool-SFT | Reliable Tool-SFT |
+|---|---:|---:|---:|
+| Accuracy | 47.21% | 43.81% | **69.17%** |
+| Length-normalized accuracy | 52.79% | 49.81% | **71.03%** |
+| Macro F1 | 30.63% | 26.26% | **52.01%** |
+| Hallucination rate ↓ | 24.42% | 40.70% | **8.14%** |
+
+The official confusion matrices also make the trade-off measurable without the
+free-form classifier. Tool-SFT calls the correct tool on 1234/1295 gold
+tool-call cases (95.3% recall) but predicts a tool on many non-call cases.
+Reliable Tool-SFT retains 1023/1295 tool-call recall (**79.0%**) while its tool
+prediction precision rises from **46.4% to 68.3%**. Missing-information class
+accuracy improves from **26.6% to 63.2%**, and cannot-answer class accuracy from
+**6.4% to 64.2%**.
+
+The generation-based tool-call and free-form decision diagnostics remain useful
+because they test emitted behavior rather than MCQ likelihoods:
 
 | Metric | Base | Tool-SFT | Reliable Tool-SFT |
 |---|---:|---:|---:|
@@ -94,22 +121,48 @@ The tool-call track contains 249 examples. The decision track uses a determinist
 
 ### Main finding
 
-Tool-SFT demonstrates that positive supervision is enough to teach highly accurate function execution (94.6% exact match) but creates severe over-calling (89.9% false-tool-call rate on When2Call). Adding ~1K negative/clarification/refusal examples reduces false calls to **11.2%** (−78.7 percentage points; 87.5% relative reduction), raises decision accuracy from **37.3% to 62.1%**, and improves missing-information and unsupported-request handling.
+Tool-SFT demonstrates that positive supervision is enough to teach highly
+accurate function execution (94.6% exact match) but not reliable tool decisions.
+On the complete official benchmark it has only 26.26% macro-F1 and a 40.70%
+hallucination rate. Adding ~1K negative/clarification/refusal examples raises
+macro-F1 to **52.01%**, normalized accuracy from **49.81% to 71.03%**, and cuts
+official hallucination to **8.14%** — a **32.56 percentage-point / 80.0%
+relative reduction**.
 
-The intervention also makes the model more conservative: exact call match falls to 86.1%, held-out-function EM to 78.3%, and tool-call recall to 48.2%. This is the central empirical result: reliable tool use is a precision/abstention versus recall trade-off, not merely a function-calling-format problem.
+The intervention remains a trade-off rather than a uniform win. Exact generated
+call match falls to 86.1% and held-out-function EM to 78.3%, while official
+tool-call recall falls from 95.3% to 79.0%. The central empirical result is that
+negative supervision sharply improves action calibration while preserving most
+of the model's ability to act when a tool is genuinely warranted.
 
 ### Run provenance
 
-The downloaded final evaluation log completed successfully on a Tesla T4 and wrote both the results and adapter archives. The evaluation run restored already-trained adapters, so it does not provide the original wall-clock training duration. The archived adapter metadata records the model/configuration, trainable parameter count, training-record count, dtype and peak GPU memory. The results ZIP passes an integrity check.
+The downloaded Kaggle evaluation log completed successfully on a Tesla T4 and
+wrote both the results and adapter archives. That run restored already-trained
+adapters, so it does not provide the original wall-clock training duration. The
+archived adapter metadata records the model/configuration, trainable parameter
+count, training-record count, dtype and peak GPU memory.
+
+The subsequent standardized Modal run used an NVIDIA L40S, BF16 + SDPA, the
+complete 3,652-example official MCQ split, pinned When2Call/LM-Eval commits, and
+Kaggle adapter dataset version 2. No training occurred in the Modal run. Its
+summary and confusion matrices are committed under
+`results/official_when2call_mcq/`.
 
 ## Recommended next validation
 
-The core project is complete. The highest-value remaining experiment is not more infrastructure or another model family; it is a standardized full When2Call evaluation that removes the custom prose-classification heuristic and uses the complete benchmark. After that, a single step-matched positive-only control would isolate negative supervision from the extra optimizer steps introduced by 4000 versus 3000 training records.
+The standardized full When2Call validation is complete. The single highest-value
+remaining experiment is now a **step-matched positive-only control**: train on
+the same 3,000 positive examples as Tool-SFT, but for approximately the same
+number of optimizer steps as Reliable Tool-SFT. That isolates the content of
+negative supervision from the extra optimizer updates introduced by 4,000
+versus 3,000 training records. No additional architecture, RAG, agent framework,
+or model-family sweep is needed for the core claim.
 
 ## Threats to validity
 
-- The `direct` / `request_for_info` / `cannot_answer` split is heuristic cue matching over generated prose. `classification_source` is stored per example so the score can be audited. On the full 3,652-row `mcq` split, the gold-answer oracle reaches 99.3% decision accuracy rather than 100%, which measures the heuristic ceiling directly.
-- The reported model decision metrics use a deterministic 1,200-example stratified subset rather than all 3,652 When2Call `mcq` examples.
+- The free-form `direct` / `request_for_info` / `cannot_answer` diagnostic uses heuristic cue matching over generated prose. `classification_source` is stored per example and the gold-answer oracle reaches 99.3%. The primary official MCQ result does not depend on this classifier.
+- The free-form diagnostic uses a deterministic 1,200-example stratified subset, while the standardized MCQ result uses all 3,652 examples. These are complementary protocols and their false-call/hallucination percentages should not be compared as if they were the same denominator or definition.
 - The two arms differ in record count (3000 vs 4000) as well as in content. The added negatives *are* the treatment, and both arms run the same 3 epochs, so gradient-step count differs slightly. That is part of the intervention rather than a controlled quantity.
 - `direct` accuracy is not measurable on the real When2Call test split, and the training negatives contain only 10 `direct` rows. Any claim about direct-answer behaviour rests on very little real data.
 - Held-out-function accuracy now rests on whole names being withheld before training sampling (verified: 0 of 511 names leak). That holds for the current corpus; re-verify if the sampling logic changes.

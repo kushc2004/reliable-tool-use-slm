@@ -58,6 +58,36 @@ def collect(results_dir: Path) -> dict[str, Any]:
             "n_when2call": decision.get("n"),
         }
 
+    official = _load(results_dir / "official_when2call_mcq" / "summary.json") or {}
+    official_runs = official.get("runs", {})
+    for run in RUNS:
+        src = official_runs.get(run, {})
+        if not src:
+            continue
+        dst = data["runs"][run]
+        dst.update(
+            {
+                "official_when2call_n": src.get("n"),
+                "official_when2call_accuracy": src.get("accuracy"),
+                "official_when2call_accuracy_norm": src.get("accuracy_norm"),
+                "official_when2call_macro_f1": src.get("macro_f1"),
+                "official_when2call_hallucination_rate": src.get("hallucination_rate"),
+            }
+        )
+
+        matrix = src.get("confusion_matrix") or {}
+        tool_row = matrix.get("true:tool_call", {})
+        tp = tool_row.get("pred:tool_call")
+        if isinstance(tp, (int, float)):
+            gold_tool = sum(v for v in tool_row.values() if isinstance(v, (int, float)))
+            predicted_tool = sum(
+                row.get("pred:tool_call", 0)
+                for row in matrix.values()
+                if isinstance(row, dict)
+            )
+            dst["official_tool_call_recall"] = tp / gold_tool if gold_tool else None
+            dst["official_tool_call_precision"] = tp / predicted_tool if predicted_tool else None
+
     # Headline deltas. Base -> Reliable shows what post-training buys overall;
     # Tool-SFT -> Reliable isolates the effect of adding negative/abstention
     # supervision. Comparing false-call rate against Base is misleading because
@@ -89,6 +119,22 @@ def collect(results_dir: Path) -> dict[str, Any]:
             tool.get("when2call_cannot_answer_accuracy"),
             final.get("when2call_cannot_answer_accuracy"),
         ),
+        "official_tool_to_reliable_accuracy_norm_gain_abs": _delta(
+            tool.get("official_when2call_accuracy_norm"),
+            final.get("official_when2call_accuracy_norm"),
+        ),
+        "official_tool_to_reliable_macro_f1_gain_abs": _delta(
+            tool.get("official_when2call_macro_f1"),
+            final.get("official_when2call_macro_f1"),
+        ),
+        "official_tool_to_reliable_hallucination_drop_abs": _drop(
+            tool.get("official_when2call_hallucination_rate"),
+            final.get("official_when2call_hallucination_rate"),
+        ),
+        "official_tool_to_reliable_hallucination_drop_rel": _drop_relative(
+            tool.get("official_when2call_hallucination_rate"),
+            final.get("official_when2call_hallucination_rate"),
+        ),
     }
 
     # Trainable-parameter accounting, written by the trainer if it ran.
@@ -115,6 +161,19 @@ def _relative(before: Any, after: Any) -> float | None:
     return (after - before) / before
 
 
+def _drop(before: Any, after: Any) -> float | None:
+    if before is None or after is None:
+        return None
+    return before - after
+
+
+def _drop_relative(before: Any, after: Any) -> float | None:
+    drop = _drop(before, after)
+    if not before or drop is None:
+        return None
+    return drop / before
+
+
 def render(data: dict[str, Any]) -> str:
     runs = data["runs"]
     head = data.get("headline", {})
@@ -124,6 +183,28 @@ def render(data: dict[str, Any]) -> str:
     lines.append("")
     lines.append("| Metric | Value |")
     lines.append("|---|---:|")
+    if runs["reliable_tool_sft"].get("official_when2call_n"):
+        lines.append(
+            f"| Official When2Call normalized accuracy | "
+            f"{_pct(runs['reliable_tool_sft'].get('official_when2call_accuracy_norm'), 2)} |"
+        )
+        lines.append(
+            f"| Official When2Call macro F1 | "
+            f"{_pct(runs['reliable_tool_sft'].get('official_when2call_macro_f1'), 2)} |"
+        )
+        lines.append(
+            f"| Official hallucination rate | "
+            f"{_pct(runs['reliable_tool_sft'].get('official_when2call_hallucination_rate'), 2)} |"
+        )
+        lines.append(
+            f"| Official hallucination reduction (Tool-SFT → Reliable) | "
+            f"{_pct(head.get('official_tool_to_reliable_hallucination_drop_abs'), 2)} |"
+        )
+        official_rel = head.get("official_tool_to_reliable_hallucination_drop_rel")
+        lines.append(
+            f"| Official relative hallucination reduction | "
+            f"{'n/a' if official_rel is None else f'{official_rel * 100:.1f}%'} |"
+        )
     lines.append(f"| Base exact tool-call accuracy | {_pct(runs['base'].get('exact_match'))} |")
     lines.append(
         f"| Reliable Tool-SFT exact tool-call accuracy | "
@@ -159,7 +240,25 @@ def render(data: dict[str, Any]) -> str:
     )
     lines.append("")
 
-    lines.append("## Full comparison")
+    if runs["reliable_tool_sft"].get("official_when2call_n"):
+        lines.append("## Official When2Call MCQ (3,652 examples)")
+        lines.append("")
+        lines.append("| Metric | Base | Tool-SFT | Reliable Tool-SFT |")
+        lines.append("|---|---:|---:|---:|")
+        official_rows = [
+            ("official_when2call_accuracy", "Accuracy"),
+            ("official_when2call_accuracy_norm", "Length-normalized accuracy"),
+            ("official_when2call_macro_f1", "Macro F1"),
+            ("official_when2call_hallucination_rate", "Hallucination rate"),
+            ("official_tool_call_precision", "Tool-call precision"),
+            ("official_tool_call_recall", "Tool-call recall"),
+        ]
+        for key, label in official_rows:
+            cells = [_pct(runs[run].get(key), 2) for run in RUNS]
+            lines.append(f"| {label} | " + " | ".join(cells) + " |")
+        lines.append("")
+
+    lines.append("## Generation-based comparison")
     lines.append("")
     lines.append("| Metric | Base | Tool-SFT | Reliable Tool-SFT |")
     lines.append("|---|---:|---:|---:|")

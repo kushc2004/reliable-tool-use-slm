@@ -1,0 +1,132 @@
+{
+  "provenance": {
+    "run_name": "official-when2call-mcq-20260913",
+    "created_utc": "2026-09-13T10:31:04.136043+00:00",
+    "gpu": "NVIDIA L40S",
+    "gpu_memory_gb": 44.39,
+    "base_model": "Qwen/Qwen2.5-1.5B-Instruct",
+    "kaggle_adapter_dataset": "kushchaudhari/reliable-tool-use-slm-adapters/versions/2",
+    "when2call_commit": "ecc8d42388e91ab37e7e737d48e16e8ecea3d1dc",
+    "lm_eval_commit": "ad8737ae7fad24cf64e50fc7fc31397bff586b9e",
+    "task": "when2call-qwen2_5",
+    "batch_size": "auto",
+    "max_batch_size": 32,
+    "limit": null,
+    "training_performed": false,
+    "precision": "bfloat16",
+    "attention": "sdpa"
+  },
+  "runs": {
+    "base": {
+      "n": 3652,
+      "macro_f1": 0.3063392216685031,
+      "accuracy": 0.4720700985761227,
+      "accuracy_norm": 0.5279299014238773,
+      "hallucination_rate": 0.2441860465116279,
+      "confusion_matrix": {
+        "true:direct": {
+          "pred:direct": 0,
+          "pred:tool_call": 0,
+          "pred:request_for_info": 0,
+          "pred:cannot_answer": 0
+        },
+        "true:tool_call": {
+          "pred:direct": 16,
+          "pred:tool_call": 1228,
+          "pred:request_for_info": 42,
+          "pred:cannot_answer": 9
+        },
+        "true:request_for_info": {
+          "pred:direct": 18,
+          "pred:tool_call": 704,
+          "pred:request_for_info": 330,
+          "pred:cannot_answer": 10
+        },
+        "true:cannot_answer": {
+          "pred:direct": 131,
+          "pred:tool_call": 556,
+          "pred:request_for_info": 442,
+          "pred:cannot_answer": 166
+        }
+      },
+      "result_file": "/cache/results/official-when2call-mcq-20260913/base/Qwen__Qwen2.5-1.5B-Instruct/results_2026-09-13T10-39-21.921381.json",
+      "samples_file": "/cache/results/official-when2call-mcq-20260913/base/Qwen__Qwen2.5-1.5B-Instruct/samples_when2call-qwen2_5_2026-09-13T10-39-21.921381.jsonl",
+      "elapsed_seconds": 500.63,
+      "adapter": null
+    },
+    "tool_sft": {
+      "n": 3652,
+      "macro_f1": 0.2625785895490299,
+      "accuracy": 0.43811610076670315,
+      "accuracy_norm": 0.49808324205914567,
+      "hallucination_rate": 0.4069767441860465,
+      "confusion_matrix": {
+        "true:direct": {
+          "pred:direct": 0,
+          "pred:tool_call": 0,
+          "pred:request_for_info": 0,
+          "pred:cannot_answer": 0
+        },
+        "true:tool_call": {
+          "pred:direct": 7,
+          "pred:tool_call": 1234,
+          "pred:request_for_info": 49,
+          "pred:cannot_answer": 5
+        },
+        "true:request_for_info": {
+          "pred:direct": 10,
+          "pred:tool_call": 763,
+          "pred:request_for_info": 283,
+          "pred:cannot_answer": 6
+        },
+        "true:cannot_answer": {
+          "pred:direct": 98,
+          "pred:tool_call": 664,
+          "pred:request_for_info": 450,
+          "pred:cannot_answer": 83
+        }
+      },
+      "result_file": "/cache/results/official-when2call-mcq-20260913/tool_sft/__cache__adapters__outputs__tool_sft/results_2026-09-13T10-55-17.728262.json",
+      "samples_file": "/cache/results/official-when2call-mcq-20260913/tool_sft/__cache__adapters__outputs__tool_sft/samples_when2call-qwen2_5_2026-09-13T10-55-17.728262.jsonl",
+      "elapsed_seconds": 951.59,
+      "adapter": "/cache/adapters/outputs/tool_sft"
+    },
+    "reliable_tool_sft": {
+      "n": 3652,
+      "macro_f1": 0.5201242382437845,
+      "accuracy": 0.6916757940854327,
+      "accuracy_norm": 0.7102957283680176,
+      "hallucination_rate": 0.08139534883720931,
+      "confusion_matrix": {
+        "true:direct": {
+          "pred:direct": 0,
+          "pred:tool_call": 0,
+          "pred:request_for_info": 0,
+          "pred:cannot_answer": 0
+        },
+        "true:tool_call": {
+          "pred:direct": 11,
+          "pred:tool_call": 1023,
+          "pred:request_for_info": 163,
+          "pred:cannot_answer": 98
+        },
+        "true:request_for_info": {
+          "pred:direct": 9,
+          "pred:tool_call": 292,
+          "pred:request_for_info": 671,
+          "pred:cannot_answer": 90
+        },
+        "true:cannot_answer": {
+          "pred:direct": 43,
+          "pred:tool_call": 183,
+          "pred:request_for_info": 237,
+          "pred:cannot_answer": 832
+        }
+      },
+      "result_file": "/cache/results/official-when2call-mcq-20260913/reliable_tool_sft/__cache__adapters__outputs__reliable_tool_sft/results_2026-09-13T11-11-15.786698.json",
+      "samples_file": "/cache/results/official-when2call-mcq-20260913/reliable_tool_sft/__cache__adapters__outputs__reliable_tool_sft/samples_when2call-qwen2_5_2026-09-13T11-11-15.786698.jsonl",
+      "elapsed_seconds": 955.92,
+      "adapter": "/cache/adapters/outputs/reliable_tool_sft"
+    }
+  }
+}
