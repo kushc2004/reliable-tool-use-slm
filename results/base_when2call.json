@@ -1,47 +1,46 @@
 {
-  "n": 160,
-  "decision_accuracy": 0.75625,
-  "macro_f1": 0.7610182560704826,
-  "tool_call_precision": 0.5970149253731343,
-  "tool_call_recall": 1.0,
-  "false_tool_call_rate": 0.225,
-  "missing_info_accuracy": 0.7,
-  "cannot_answer_accuracy": 0.7,
-  "direct_accuracy": 0.625,
+  "n": 1200,
+  "decision_accuracy": 0.2325,
+  "macro_f1": 0.16716615816907615,
+  "tool_call_precision": null,
+  "tool_call_recall": 0.0,
+  "false_tool_call_rate": 0.0,
+  "missing_info_accuracy": 0.66189111747851,
+  "cannot_answer_accuracy": 0.11267605633802817,
+  "direct_accuracy": null,
   "json_validity": 1.0,
-  "n_gold_tool_call": 40,
-  "n_gold_non_call": 120,
+  "n_gold_tool_call": 425,
+  "n_gold_non_call": 775,
   "classification_source_counts": {
-    "default_direct": 37,
-    "tool_call": 67,
-    "request_cue": 28,
-    "cannot_cue": 28
+    "request_cue": 625,
+    "default_direct": 507,
+    "cannot_cue": 68
   },
   "confusion_matrix": {
     "tool_call": {
-      "tool_call": 40,
-      "direct": 0,
-      "request_for_info": 0,
-      "cannot_answer": 0
+      "tool_call": 0,
+      "direct": 239,
+      "request_for_info": 176,
+      "cannot_answer": 10
     },
     "direct": {
-      "tool_call": 15,
-      "direct": 25,
+      "tool_call": 0,
+      "direct": 0,
       "request_for_info": 0,
       "cannot_answer": 0
     },
     "request_for_info": {
-      "tool_call": 12,
-      "direct": 0,
-      "request_for_info": 28,
-      "cannot_answer": 0
+      "tool_call": 0,
+      "direct": 108,
+      "request_for_info": 231,
+      "cannot_answer": 10
     },
     "cannot_answer": {
       "tool_call": 0,
-      "direct": 12,
-      "request_for_info": 0,
-      "cannot_answer": 28
+      "direct": 160,
+      "request_for_info": 218,
+      "cannot_answer": 48
     }
   },
-  "backend": "dummy"
+  "backend": "hf"
 }

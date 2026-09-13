@@ -135,7 +135,7 @@ def _pct(value: Any) -> str:
 def write_csv(rows: list[dict[str, Any]], out_path: Path) -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with out_path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.writer(handle)
+        writer = csv.writer(handle, lineterminator="\n")
         writer.writerow(["metric"] + [row["checkpoint"] for row in rows])
         for column in COLUMNS:
             writer.writerow([column] + [_pct(row.get(column)) for row in rows])

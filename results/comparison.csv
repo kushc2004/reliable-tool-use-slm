@@ -1,10 +1,10 @@
 metric,Base,Tool-SFT,Reliable Tool-SFT
-exact_match,36.2,100.0,83.8
-tool_selection_accuracy,36.2,100.0,83.8
-argument_accuracy,36.2,100.0,83.8
-json_validity,100.0,100.0,100.0
-unseen_function_accuracy,32.5,100.0,80.0
-when2call_decision_accuracy,75.6,25.0,36.9
-when2call_false_tool_call_rate,22.5,66.7,57.5
-when2call_missing_info_accuracy,70.0,0.0,22.5
-when2call_cannot_answer_accuracy,70.0,0.0,20.0
+exact_match,0.0,94.6,86.1
+tool_selection_accuracy,0.0,95.2,87.3
+argument_accuracy,0.0,94.9,86.7
+json_validity,100.0,99.2,100.0
+unseen_function_accuracy,0.0,96.4,78.3
+when2call_decision_accuracy,23.2,37.3,62.1
+when2call_false_tool_call_rate,0.0,89.9,11.2
+when2call_missing_info_accuracy,66.2,10.0,73.4
+when2call_cannot_answer_accuracy,11.3,0.0,66.7

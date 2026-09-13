@@ -48,12 +48,12 @@ One caveat, measured rather than assumed: the `mcq` test split carries all four 
 
 Two checks run before any model is trusted:
 
-1. **Oracle check.** A backend that echoes the gold answer must score 100% on every decision metric. If it does not, the scorer is broken and no model number means anything.
+1. **Oracle check.** A backend that echoes the gold answer measures the ceiling of the prose classifier. Tool-call decisions are exact; the free-form clarification/refusal categories are cue-classified, so the real full-split oracle is expected to be close to rather than literally 100%.
 2. **Unit tests.** `tests/test_decision_metrics.py` pins classification for each of the four categories and asserts the oracle property directly.
 
 Both caught a real defect. The first oracle run scored 93.75% decision accuracy with missing-info accuracy at 75%. Diagnosis: the `request_for_info` cue list covered "could you provide/specify..." but not "what is the identifier you would like me to look up?", so ten genuine clarification rows were classified as `direct`.
 
-The fix required care. The obvious widening — matching any `what is the <word>` — would have broken `cannot_answer`, because rows like "what is the air quality in Hanoi?" are unsupported requests, not clarifications. The patterns were widened with a bounded list of argument-shaped nouns (`invoice`, `order`, `identifier`, `ticker`, …) plus explicit frames (`what should I`, `what would you like`). Oracle returned to 100%, and the cases are now pinned by tests so the bug cannot silently return.
+The fix required care. The obvious widening — matching any `what is the <word>` — would have broken `cannot_answer`, because rows like "what is the air quality in Hanoi?" are unsupported requests, not clarifications. The patterns were widened with a bounded list of argument-shaped nouns (`invoice`, `order`, `identifier`, `ticker`, …) plus explicit frames (`what should I`, `what would you like`). On the complete 3,652-row `mcq` split the resulting gold-answer oracle scores **99.3% decision accuracy**, with the residual errors retained as an explicit measurement of the heuristic ceiling. The covered cases are pinned by tests so the classifier cannot silently regress.
 
 ## Defects found while building
 
@@ -69,36 +69,49 @@ All of these were caught by running against the real Hub corpora, not by reading
 
 Two guards cover the same class of failure: `build_dataset` refuses to write an empty training split and names the drop reasons, and `train_qlora` refuses to train on zero records. Both conditions were previously silent.
 
-## Current status
+## Final model results
 
-The pipeline runs end to end. `MODE=smoke ./scripts/run_experiments.sh` builds the offline corpus, runs both evaluation tracks with scripted backends, writes `comparison.csv`, generates three figures, and produces `error_analysis.json` and `cv_metrics.md`.
+The real GPU experiment has completed. The evaluated checkpoints use the Hugging Face backend rather than the scripted smoke fixture, and the real metrics are now promoted into the committed `results/` directory.
 
-The **data layer is verified against the real Hub corpora**: `build_dataset --source glaive,when2call` converts 11,099 of 20,000 Glaive rows and builds a 4000-row training corpus (3000 positives + 1000 negatives) with 249 eval rows across all three splits. The **model layer is not** — `torch`, `transformers` and `peft` are absent from this environment and there is no GPU, so `MODE=full` cannot run here. Consequently:
+| Metric | Base | Tool-SFT | Reliable Tool-SFT |
+|---|---:|---:|---:|
+| Exact tool-call match | 0.0% | **94.6%** | 86.1% |
+| Function-name accuracy | 0.0% | **95.2%** | 87.3% |
+| Argument accuracy | 0.0% | **94.9%** | 86.7% |
+| JSON validity | 100.0% | 99.2% | **100.0%** |
+| Held-out function EM | 0.0% | **96.4%** | 78.3% |
+| When2Call decision accuracy | 23.2% | 37.3% | **62.1%** |
+| When2Call macro F1 | 16.7% | 17.9% | **47.4%** |
+| Tool-call precision | n/a | 37.2% | **70.2%** |
+| Tool-call recall | 0.0% | **97.2%** | 48.2% |
+| False tool-call rate ↓ | 0.0%* | 89.9% | **11.2%** |
+| Missing-info accuracy | 66.2% | 10.0% | **73.4%** |
+| Cannot-answer accuracy | 11.3% | 0.0% | **66.7%** |
 
-- The numbers currently in `results/` come from scripted backends and are **pipeline-validation artifacts, not model results.**
-- The "key finding" section of the README is intentionally unwritten. It should be written from a real run, not from fixtures.
+\* Base almost never emits calls, so its 0% false-call rate is degenerate. The meaningful reliability ablation is Tool-SFT → Reliable Tool-SFT.
 
-What the smoke run does establish is that the measurement apparatus works and reproduces the expected failure shape: the positive-only backend reaches 100% exact tool-call match while its false tool-call rate rises from 22.5% to 66.7%.
+The tool-call track contains 249 examples. The decision track uses a deterministic 1,200-example label-stratified subset of When2Call: 425 `tool_call`, 349 `request_for_info`, and 426 `cannot_answer` cases. The final evaluated adapters use Qwen2.5-1.5B-Instruct with 4-bit QLoRA; the run metadata records 18,464,768 trainable parameters (2.036% of 907,081,216) and 4.86 GB peak GPU memory on a Tesla T4.
 
-## How to finish
+### Main finding
 
-```bash
-MODE=full ./scripts/run_experiments.sh
-```
+Tool-SFT demonstrates that positive supervision is enough to teach highly accurate function execution (94.6% exact match) but creates severe over-calling (89.9% false-tool-call rate on When2Call). Adding ~1K negative/clarification/refusal examples reduces false calls to **11.2%** (−78.7 percentage points; 87.5% relative reduction), raises decision accuracy from **37.3% to 62.1%**, and improves missing-information and unsupported-request handling.
 
-On a Kaggle T4 (or Colab L4) this trains both adapters and evaluates all three checkpoints. `kaggle/` holds a notebook that drives it, cloning this repo so the code has one source of truth rather than a copy that drifts. Then:
+The intervention also makes the model more conservative: exact call match falls to 86.1%, held-out-function EM to 78.3%, and tool-call recall to 48.2%. This is the central empirical result: reliable tool use is a precision/abstention versus recall trade-off, not merely a function-calling-format problem.
 
-- `results/comparison.csv` — the three-way table
-- `results/figures/exact_match.png`, `false_tool_call.png`, `confusion_matrix.png`
-- `results/error_analysis.json` — 20 categorised failures
-- `results/cv_metrics.md` — headline deltas, computed from the result files
+### Run provenance
 
-GPU model, wall-clock training time and peak memory are not recorded by these scripts; capture those from the run log to complete the CV summary.
+The downloaded final evaluation log completed successfully on a Tesla T4 and wrote both the results and adapter archives. The evaluation run restored already-trained adapters, so it does not provide the original wall-clock training duration. The archived adapter metadata records the model/configuration, trainable parameter count, training-record count, dtype and peak GPU memory. The results ZIP passes an integrity check.
+
+## Recommended next validation
+
+The core project is complete. The highest-value remaining experiment is not more infrastructure or another model family; it is a standardized full When2Call evaluation that removes the custom prose-classification heuristic and uses the complete benchmark. After that, a single step-matched positive-only control would isolate negative supervision from the extra optimizer steps introduced by 4000 versus 3000 training records.
 
 ## Threats to validity
 
-- The `direct` / `request_for_info` / `cannot_answer` split is heuristic cue matching. `classification_source` is stored per example so the share of decisions resting on the heuristic can be audited; on real When2Call prose the cue lists may need further widening — the synthetic fixture is cleaner than real data.
+- The `direct` / `request_for_info` / `cannot_answer` split is heuristic cue matching over generated prose. `classification_source` is stored per example so the score can be audited. On the full 3,652-row `mcq` split, the gold-answer oracle reaches 99.3% decision accuracy rather than 100%, which measures the heuristic ceiling directly.
+- The reported model decision metrics use a deterministic 1,200-example stratified subset rather than all 3,652 When2Call `mcq` examples.
 - The two arms differ in record count (3000 vs 4000) as well as in content. The added negatives *are* the treatment, and both arms run the same 3 epochs, so gradient-step count differs slightly. That is part of the intervention rather than a controlled quantity.
 - `direct` accuracy is not measurable on the real When2Call test split, and the training negatives contain only 10 `direct` rows. Any claim about direct-answer behaviour rests on very little real data.
 - Held-out-function accuracy now rests on whole names being withheld before training sampling (verified: 0 of 511 names leak). That holds for the current corpus; re-verify if the sampling logic changes.
 - `results/` is tracked in git by choice, so a run that fails partway can still republish the previous run's numbers. The notebook mitigates this by deleting `results/` after cloning; any other consumer of this repo must do the same.
+- The final comparison is one QLoRA configuration/seed, so there are no multi-seed confidence intervals.

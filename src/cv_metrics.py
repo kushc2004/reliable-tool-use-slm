@@ -48,25 +48,46 @@ def collect(results_dir: Path) -> dict[str, Any]:
             "unseen_function_accuracy": overall.get("unseen_function_accuracy"),
             "false_tool_call_rate": overall.get("false_tool_call_rate"),
             "when2call_decision_accuracy": decision.get("decision_accuracy"),
+            "when2call_macro_f1": decision.get("macro_f1"),
+            "when2call_tool_call_precision": decision.get("tool_call_precision"),
+            "when2call_tool_call_recall": decision.get("tool_call_recall"),
             "when2call_false_tool_call_rate": decision.get("false_tool_call_rate"),
             "when2call_missing_info_accuracy": decision.get("missing_info_accuracy"),
+            "when2call_cannot_answer_accuracy": decision.get("cannot_answer_accuracy"),
             "n_tool_eval": overall.get("n"),
             "n_when2call": decision.get("n"),
         }
 
-    # Headline deltas: base -> Reliable Tool-SFT.
+    # Headline deltas. Base -> Reliable shows what post-training buys overall;
+    # Tool-SFT -> Reliable isolates the effect of adding negative/abstention
+    # supervision. Comparing false-call rate against Base is misleading because
+    # Base almost never calls a tool, so its 0% false-call rate is degenerate.
     base = data["runs"]["base"]
+    tool = data["runs"]["tool_sft"]
     final = data["runs"]["reliable_tool_sft"]
+    tool_false = tool.get("when2call_false_tool_call_rate")
+    final_false = final.get("when2call_false_tool_call_rate")
+    false_drop = None if tool_false is None or final_false is None else tool_false - final_false
+    false_drop_rel = None if not tool_false or final_false is None else false_drop / tool_false
     data["headline"] = {
         "exact_match_gain_abs": _delta(base.get("exact_match"), final.get("exact_match")),
         "exact_match_gain_rel": _relative(base.get("exact_match"), final.get("exact_match")),
-        "false_call_drop_abs": _delta(
-            base.get("when2call_false_tool_call_rate"),
-            final.get("when2call_false_tool_call_rate"),
+        "tool_to_reliable_exact_match_change_abs": _delta(
+            tool.get("exact_match"), final.get("exact_match")
         ),
-        "decision_accuracy_gain_abs": _delta(
-            base.get("when2call_decision_accuracy"),
+        "tool_to_reliable_false_call_drop_abs": false_drop,
+        "tool_to_reliable_false_call_drop_rel": false_drop_rel,
+        "tool_to_reliable_decision_accuracy_gain_abs": _delta(
+            tool.get("when2call_decision_accuracy"),
             final.get("when2call_decision_accuracy"),
+        ),
+        "tool_to_reliable_missing_info_gain_abs": _delta(
+            tool.get("when2call_missing_info_accuracy"),
+            final.get("when2call_missing_info_accuracy"),
+        ),
+        "tool_to_reliable_cannot_answer_gain_abs": _delta(
+            tool.get("when2call_cannot_answer_accuracy"),
+            final.get("when2call_cannot_answer_accuracy"),
         ),
     }
 
@@ -116,16 +137,25 @@ def render(data: dict[str, Any]) -> str:
         f"{_pct(runs['reliable_tool_sft'].get('unseen_function_accuracy'))} |"
     )
     lines.append(
-        f"| Base false tool-call rate | "
-        f"{_pct(runs['base'].get('when2call_false_tool_call_rate'))} |"
+        f"| Tool-SFT false tool-call rate | "
+        f"{_pct(runs['tool_sft'].get('when2call_false_tool_call_rate'))} |"
     )
     lines.append(
         f"| Reliable Tool-SFT false tool-call rate | "
         f"{_pct(runs['reliable_tool_sft'].get('when2call_false_tool_call_rate'))} |"
     )
     lines.append(
-        f"| Absolute reduction in false tool calls | "
-        f"{_pct(head.get('false_call_drop_abs'))} |"
+        f"| False tool-call reduction (Tool-SFT → Reliable) | "
+        f"{_pct(head.get('tool_to_reliable_false_call_drop_abs'))} |"
+    )
+    false_rel = head.get("tool_to_reliable_false_call_drop_rel")
+    lines.append(
+        f"| Relative false tool-call reduction | "
+        f"{'n/a' if false_rel is None else f'{false_rel * 100:.1f}%'} |"
+    )
+    lines.append(
+        f"| Decision-accuracy gain (Tool-SFT → Reliable) | "
+        f"{_pct(head.get('tool_to_reliable_decision_accuracy_gain_abs'))} |"
     )
     lines.append("")
 
@@ -140,8 +170,12 @@ def render(data: dict[str, Any]) -> str:
         ("json_validity", "JSON validity"),
         ("unseen_function_accuracy", "Held-out function EM"),
         ("when2call_decision_accuracy", "When2Call decision accuracy"),
+        ("when2call_macro_f1", "When2Call macro F1"),
+        ("when2call_tool_call_precision", "Tool-call precision"),
+        ("when2call_tool_call_recall", "Tool-call recall"),
         ("when2call_false_tool_call_rate", "When2Call false tool-call rate"),
         ("when2call_missing_info_accuracy", "Missing-info accuracy"),
+        ("when2call_cannot_answer_accuracy", "Cannot-answer accuracy"),
     ]
     for key, label in rows:
         cells = [_pct(runs[run].get(key)) for run in RUNS]
@@ -170,9 +204,11 @@ def render(data: dict[str, Any]) -> str:
 
     lines.append("---")
     lines.append("")
-    lines.append("Numbers are read directly from `results/*.json`. Fill in GPU model, "
-                 "wall-clock training time and peak memory from your own run log — those "
-                 "are not recorded by these scripts.")
+    lines.append("Numbers are read directly from `results/*.json`. Base's 0% false-call "
+                 "rate is intentionally not used as a reliability headline because Base "
+                 "almost never calls tools; the meaningful negative-supervision comparison "
+                 "is Tool-SFT → Reliable Tool-SFT. GPU model, wall-clock training time and "
+                 "peak memory should be taken from the run log when not present in run_config.json.")
     return "\n".join(lines)
 
 

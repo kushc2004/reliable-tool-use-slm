@@ -41,15 +41,39 @@ Two caveats on this track, both measured against the real dataset rather than as
 
 ## Results
 
-> **No model numbers exist yet.** Every figure in `results/` was produced by `MODE=smoke`, which uses *scripted backends* rather than a trained model. They validate the pipeline and the metric layer end to end; they are **not** research results. Run `MODE=full` on a GPU to produce the real ones.
+The full GPU experiment has now been evaluated with the real Hugging Face model backend on a Kaggle Tesla T4. The committed files under `results/` are the real model results; `results/comparison.md` and `results/comparison.csv` are regenerated directly from the raw metric JSON files.
 
-The generated table lives in `results/comparison.md` and `results/comparison.csv`, written by `src/aggregate_results.py` on every run. It is deliberately **not** reproduced here: the smoke numbers move with `N_EVAL` and with the backend's `--failure-rate`, so a hand-copied table in this file goes stale the moment anyone re-runs — which is how the earlier version of this README came to disagree with its own results directory.
+| Metric | Base | Tool-SFT | Reliable Tool-SFT |
+|---|---:|---:|---:|
+| Exact tool-call match | 0.0% | **94.6%** | 86.1% |
+| Function-name accuracy | 0.0% | **95.2%** | 87.3% |
+| Argument accuracy | 0.0% | **94.9%** | 86.7% |
+| JSON validity | 100.0% | 99.2% | **100.0%** |
+| Held-out function EM | 0.0% | **96.4%** | 78.3% |
+| When2Call decision accuracy | 23.2% | 37.3% | **62.1%** |
+| False tool-call rate ↓ | 0.0%* | 89.9% | **11.2%** |
+| Missing-info accuracy | 66.2% | 10.0% | **73.4%** |
+| Cannot-answer accuracy | 11.3% | 0.0% | **66.7%** |
 
-What the smoke run does establish is that the harness detects the failure the project is built around. The positive-only backend drives tool-call accuracy to 100% while its false tool-call rate rises from 22.5% to 66.7% — the exact trade-off the real experiment is designed to measure on a trained model.
+The tool-call track contains 249 examples (166 call-required and 83 no-tool); the When2Call decision track uses a fixed, label-stratified 1,200-example subset (425 `tool_call`, 349 `request_for_info`, 426 `cannot_answer`). The real `mcq` split has no gold `direct` rows, so direct-answer accuracy is not reported as a model claim.
+
+Additional decision metrics expose the reliability/recall trade-off:
+
+| Metric | Base | Tool-SFT | Reliable Tool-SFT |
+|---|---:|---:|---:|
+| Macro F1 | 16.7% | 17.9% | **47.4%** |
+| Tool-call precision | n/a | 37.2% | **70.2%** |
+| Tool-call recall | 0.0% | **97.2%** | 48.2% |
+
+\* Base's 0% false-tool-call rate is degenerate: the base model essentially never emits tool calls, so it cannot be treated as a strong reliability baseline. The meaningful negative-supervision comparison is Tool-SFT → Reliable Tool-SFT.
 
 ## Key finding
 
-**Not yet written.** The smoke backends are scripted, so any conclusion drawn from them would be circular. Run `MODE=full` and let `src/cv_metrics.py` compute the deltas; write the finding from those.
+Positive-only function-calling SFT teaches the model **how to call tools** but makes it call far too often: Tool-SFT reaches 94.6% exact call match while falsely calling a tool on 89.9% of non-tool When2Call cases. Adding ~1K clarification/refusal/no-tool examples cuts that false-call rate to **11.2%** (−78.7 percentage points, **87.5% relative reduction**) and raises When2Call decision accuracy from **37.3% to 62.1%**.
+
+That reliability gain is not free. Reliable Tool-SFT falls from 94.6% to 86.1% exact call match, from 96.4% to 78.3% held-out-function EM, and from 97.2% to 48.2% tool-call recall. The result is therefore a calibrated trade-off rather than a uniformly better checkpoint: negative supervision sharply reduces action hallucination and improves abstention/clarification behaviour, but makes the model more conservative when a call is actually warranted.
+
+The evaluated adapters use Qwen2.5-1.5B-Instruct with 4-bit QLoRA. The run metadata records 18,464,768 trainable parameters (2.036% of 907,081,216) and 4.86 GB peak GPU memory on a Tesla T4. The final evaluation run restored already-trained adapters, so the original training wall-clock duration is not reconstructed from this log.
 
 ## Reproduction
 
@@ -81,6 +105,46 @@ python -m src.train_qlora --config configs/tool_sft.yaml \
 python -m src.train_qlora --config configs/reliable_tool_sft.yaml \
     --data data/processed --variant sft-neg --out outputs/reliable_tool_sft
 ```
+
+### Official When2Call MCQ validation on Modal
+
+The final standardized validation is **evaluation-only**: it does not retrain
+either QLoRA adapter. `modal_jobs/when2call_mcq.py` downloads version 2 of the
+public Kaggle adapter dataset (`kushchaudhari/reliable-tool-use-slm-adapters`),
+caches `Qwen/Qwen2.5-1.5B-Instruct` on a persistent Modal Volume, and evaluates:
+
+1. Base Qwen2.5-1.5B-Instruct
+2. Tool-SFT adapter
+3. Reliable Tool-SFT adapter
+
+using NVIDIA's official `when2call-qwen2_5` LM-Eval-Harness MCQ task. The
+When2Call and LM-Eval repositories are pinned to exact commits, and the runner
+records those commits, GPU, precision, dataset version and timings in
+`provenance.json`.
+
+The asset download/model cache happens in a CPU-only Modal function so GPU time
+is spent only on evaluation. The default GPU is an L40S; LM-Eval uses automatic
+batch sizing with a configurable cap.
+
+```bash
+# The Modal CLI can also be invoked as `uvx modal ...` if it is not on PATH.
+
+# First verify the complete stack cheaply.
+uvx modal run modal_jobs/when2call_mcq.py --limit 32
+
+# Then run all 3,652 official MCQ examples for all three checkpoints.
+uvx modal run modal_jobs/when2call_mcq.py
+
+# Download a completed run (the command printed by the job contains the exact path).
+uvx modal volume get reliable-tool-use-slm-eval \
+    results/<run-name> modal-results/<run-name>
+```
+
+The official MCQ run reports macro-F1, raw accuracy, length-normalized accuracy,
+tool-hallucination rate and the answer-category confusion matrix. These metrics
+are kept separate from the project's free-form 1,200-example decision track;
+the latter measures generated behavior, while the MCQ benchmark provides the
+standardized published comparison.
 
 The scorer is verified against a perfect oracle before any model is trusted — a step that caught a real classifier bug during development (see below).
 
@@ -115,11 +179,13 @@ During development the oracle sanity check scored 93.75% instead of 100%, which 
 
 ## Limitations
 
-- The full training run has **not** been executed in this environment: `torch`, `transformers` and `peft` are not installed and no GPU is available. Everything up to and including the data layer is exercised against the real Hub corpora; the model numbers are not yet produced.
-- Under `MODE=smoke` the corpus is synthetic and is a pipeline fixture only. Under `MODE=full`, `data/processed` is the real shared Glaive + When2Call corpus, verified to build 4000 train / 249 eval rows across all three splits (`heldout_tools`, `unseen_functions`, `no_tool`).
+- The committed model metrics come from a real GPU evaluation. `MODE=smoke` still exists only as an offline pipeline fixture and must never be interpreted as model performance.
+- The When2Call numbers reported above use a deterministic 1,200-example stratified subset rather than the full 3,652-row `mcq` split. A full official benchmark evaluation is the highest-value remaining validation step.
+- `direct` / `request_for_info` / `cannot_answer` are inferred from free-form model prose by an auditable cue-based classifier. On the full 3,652-row split, an oracle that emits the gold answer text scores 99.3% decision accuracy, so the heuristic imposes a small measured ceiling on absolute scores. A standardized multiple-choice evaluator would remove this dependency.
 - The two arms differ in record count (3000 vs 4000) as well as in content, because the added negatives *are* the treatment. Both run the same 3 epochs, so gradient-step count differs slightly — that is part of the intervention, not a controlled quantity.
 - `direct` accuracy is not measurable on the real When2Call test split (no gold-`direct` rows), and the training negatives are capped at 10 `direct` rows by the benchmark itself. See the Evaluation section.
-- The `direct` / `request_for_info` / `cannot_answer` split is heuristic cue matching over prose. `classification_source` is stored per example so the share of decisions resting on the heuristic can be audited; on real When2Call prose the cue lists may still need widening.
+- Results are from one QLoRA configuration/seed. The project deliberately avoids a large hyperparameter sweep, but the reported deltas do not include multi-seed confidence intervals.
+- The held-out-function split withholds whole function names before training sampling (verified: 0 of 511 held-out names leak into training). Re-verify this invariant if the data-building logic changes.
 
 ## Acknowledgements
 

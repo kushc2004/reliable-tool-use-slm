@@ -32,6 +32,9 @@ __pycache__/
 # committed to git.
 /kaggle-outputs/
 
+# Results downloaded from Modal evaluation jobs.
+/modal-results/
+
 # Staging directory used by scripts/publish_adapters.sh
 /.kaggle-adapters-stage/
 
